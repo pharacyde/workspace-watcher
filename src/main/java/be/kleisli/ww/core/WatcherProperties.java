@@ -71,6 +71,17 @@ public class WatcherProperties {
   private String database =
       System.getProperty("user.home") + "/.claude/workspace-watcher/events.db";
 
+  /**
+   * How the account behind these sessions is billed: {@code auto}, {@code api} or {@code
+   * subscription}.
+   *
+   * <p>It decides what a cost figure is allowed to claim. On a subscription nobody pays per token,
+   * so a dollar amount is what the tokens would have cost at API rates - a useful measure of how
+   * heavy a session was, and not a bill. Presenting it as one would be a lie the tool tells
+   * confidently.
+   */
+  private String billing = "auto";
+
   /** How long recorded history is kept. */
   private int retentionDays = 30;
 
@@ -180,6 +191,14 @@ public class WatcherProperties {
 
   public void setRetentionDays(int retentionDays) {
     this.retentionDays = retentionDays;
+  }
+
+  public String getBilling() {
+    return billing;
+  }
+
+  public void setBilling(String billing) {
+    this.billing = billing;
   }
 
   public int getMaxSessions() {

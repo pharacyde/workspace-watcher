@@ -143,6 +143,11 @@ public class ApiMapper {
                 .toList())
         .tokens(toTokens(summary.tokens()))
         .costUsd(summary.costUsd())
+        .billedPerToken(summary.billedPerToken())
+        .billingMode(summary.billingMode())
+        .plan(summary.plan())
+        .last5h(toTokens(summary.last5h()))
+        .last7d(toTokens(summary.last7d()))
         .build();
   }
 

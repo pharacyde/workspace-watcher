@@ -86,6 +86,10 @@ colour. Click a slice to scrub back into it; the activity panel becomes a replay
 read from the database rather than the buffer, so it reaches back past what the live stream still
 holds. A button returns you to live.
 
+The activity panel has `follow` and `pause`. Follow is `tail -f`: scroll to the newest row as it
+arrives, and it yields while you are scrolled up reading. Pause holds new events rather than
+dropping them — the button shows how many are waiting, and resuming plays them in.
+
 Two filters, in that order. The header picks the **workspace** — every project a hook has fired in
 registers itself, so the list fills as you work. The activity panel then picks the **agent session**
 within it, because one workspace often has several agents running in separate terminals, and every
@@ -195,6 +199,13 @@ is per token kind rather than one total — because they are not priced alike, a
 not small. Measured on this project: 224M cache reads against 1.2M output tokens, and the cache
 reads were **71% of the bill**. A tracker that counted only input and output would have reported a
 fifth of the real figure, confidently.
+
+**It says whether it is a bill.** On a Claude subscription nobody pays per token — there is a flat
+fee and usage limits — so the amount is prefixed with `≈` and labelled *what these tokens would
+cost at API rates*. Detected from the local config; override with `watcher.billing`. The panel also
+shows tokens used in the last five hours and seven days, which is the shape those limits take.
+How much of an allowance *remains* is not shown, because it is not knowable from this machine:
+Claude Code keeps no local record and fetches it live with the account credential.
 
 Rates live in `pricing.json` beside the database, seeded from the bundled table. They are a
 snapshot and they change, so the file is meant to be edited. A model with no entry is reported as

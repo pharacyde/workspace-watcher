@@ -32,11 +32,14 @@ export class Feed extends LitElement {
     hidden_: { state: true },
     session: { state: true },
     replay: { attribute: false },
+    follow: { state: true },
     workspace: { attribute: false },
     replayed: { state: true },
   };
 
   declare private hidden_: Set<Source>;
+  /** Auto-scroll to the newest row, like tail -f. */
+  declare private follow: boolean;
   /** Empty means every agent in this workspace. */
   declare private session: string;
   /** Set by the timeline to a recorded window; null means follow the live stream. */
@@ -101,6 +104,27 @@ export class Feed extends LitElement {
         letter-spacing: 0;
         font-weight: 400;
       }
+      button {
+        background: none;
+        border: 1px solid var(--line);
+        color: var(--dim);
+        border-radius: 4px;
+        font: inherit;
+        font-size: 11px;
+        padding: 0 6px;
+        cursor: pointer;
+        text-transform: none;
+        letter-spacing: 0;
+        font-weight: 400;
+      }
+      button.on {
+        color: var(--add);
+        border-color: var(--add);
+      }
+      button.paused {
+        color: var(--warn);
+        border-color: var(--warn);
+      }
       select {
         background: var(--panel);
         color: var(--text);
@@ -131,6 +155,7 @@ export class Feed extends LitElement {
   constructor() {
     super();
     this.hidden_ = new Set();
+    this.follow = true;
     this.session = '';
     this.replay = null;
     this.replayed = [];
@@ -151,7 +176,9 @@ export class Feed extends LitElement {
   }
 
   private followTail() {
-    if (!this.stuckToBottom || this.replay) return;
+    // Two conditions, deliberately: the button is the intent, being scrolled to the bottom is the
+    // moment. Following while someone has scrolled up to read would yank the view away from them.
+    if (!this.follow || !this.stuckToBottom || this.replay) return;
     const list = this.renderRoot.querySelector('lit-virtualizer');
     if (list) list.scrollTop = list.scrollHeight;
   }
@@ -234,6 +261,25 @@ export class Feed extends LitElement {
               >${new Date(this.replay.since).toLocaleTimeString('en-GB', { hour12: false })}</span
             >`
           : ''}
+        <button
+          class=${this.follow ? 'on' : ''}
+          title="Scroll to the newest row as it arrives, like tail -f"
+          @click=${() => {
+            this.follow = !this.follow;
+            if (this.follow) this.stuckToBottom = true;
+          }}
+        >
+          ${this.follow ? '⤓ follow' : '⤓ follow off'}
+        </button>
+        <button
+          class=${this.log.paused ? 'paused' : ''}
+          title="Hold new events. Nothing is lost - they arrive when you resume."
+          @click=${() => this.log.setPaused(!this.log.paused)}
+        >
+          ${this.log.paused
+            ? html`▶ resume${this.log.held ? html` (${this.log.held})` : ''}`
+            : '⏸ pause'}
+        </button>
         ${this.sessionPicker()}
         <span class="filters">
           ${ALL_SOURCES.map(

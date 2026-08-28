@@ -4,6 +4,11 @@ import { UsageDocument } from '../api/documents';
 
 type UsageData = {
   costUsd: number | null;
+  billedPerToken: boolean;
+  billingMode: string;
+  plan: string | null;
+  last5h: { total: number };
+  last7d: { total: number };
   tokens: {
     input: number;
     output: number;
@@ -83,6 +88,12 @@ export class UsagePill extends LitElement {
       border-top: 1px solid var(--line);
       padding-top: 3px;
     }
+    .note {
+      color: var(--warn);
+      margin-bottom: 4px;
+      max-width: 40ch;
+      white-space: normal;
+    }
     .models {
       margin-top: 6px;
       padding-top: 5px;
@@ -130,11 +141,14 @@ export class UsagePill extends LitElement {
     if (!this.usage) return html``;
     const { tokens, costUsd, models } = this.usage;
 
+    // A dollar amount on a subscription is not a bill - nobody pays per token there - so it is
+    // prefixed with "≈" and spelled out in the detail. Showing it bare would be a confident lie.
+    const approx = !this.usage.billedPerToken;
     return html`
       <span class="pill" @click=${() => (this.open = !this.open)}>
         ${costUsd === null
           ? html`${compact.format(tokens.total)} tokens`
-          : html`<span class="cost">$${costUsd.toFixed(2)}</span> ·
+          : html`<span class="cost">${approx ? '≈' : ''}$${costUsd.toFixed(2)}</span> ·
               ${compact.format(tokens.total)}`}
       </span>
       ${this.open
@@ -150,6 +164,18 @@ export class UsagePill extends LitElement {
                   <td class="n">${full.format(tokens.total)}</td>
                 </tr>
               </table>
+              <div class="models">
+                <div class="note">
+                  ${approx
+                    ? html`not a bill — what these tokens would cost at API rates.<br />
+                        billed as ${this.usage.billingMode}${this.usage.plan
+                          ? html` · ${this.usage.plan}`
+                          : ''}`
+                    : html`billed per token at API rates`}
+                </div>
+                <div>last 5h · ${compact.format(this.usage.last5h.total)} tokens</div>
+                <div>last 7d · ${compact.format(this.usage.last7d.total)} tokens</div>
+              </div>
               <div class="models">
                 ${models.map(
                   (m) => html`

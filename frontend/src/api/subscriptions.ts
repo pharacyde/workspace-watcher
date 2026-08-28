@@ -46,6 +46,8 @@ export class LatestController<TResult> implements ReactiveController {
  */
 export class EventLogController<TItem extends { seq: string }> implements ReactiveController {
   items: TItem[] = [];
+  /** While paused, arrivals are held rather than dropped: unpausing shows what was missed. */
+  paused = false;
   private pending: TItem[] = [];
   private frame: number | null = null;
   private unsubscribe?: () => void;
@@ -65,6 +67,10 @@ export class EventLogController<TItem extends { seq: string }> implements Reacti
       if (seq <= this.lastSeq) return;
       this.lastSeq = seq;
       this.pending.push(data.events);
+      if (this.paused) {
+        this.host.requestUpdate();
+        return;
+      }
       this.frame ??= requestAnimationFrame(() => this.flush());
     });
   }
@@ -89,6 +95,19 @@ export class EventLogController<TItem extends { seq: string }> implements Reacti
     // Dropped rather than kept: they would otherwise arrive in the feed out of order after a
     // later reconnect.
     this.pending = [];
+  }
+
+  /** How many arrivals are waiting because the log is paused. */
+  get held(): number {
+    return this.paused ? this.pending.length : 0;
+  }
+
+  setPaused(paused: boolean): void {
+    this.paused = paused;
+    if (!paused) {
+      this.flush();
+    }
+    this.host.requestUpdate();
   }
 
   private flush(): void {

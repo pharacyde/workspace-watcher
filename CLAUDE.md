@@ -152,6 +152,18 @@ own `~/.claude`.
   for what may be millions of rows. Do not "simplify" it into fetching events and counting them.
 - **The timeline draws two densities.** File events dwarf agent events by orders of magnitude, so a
   single total bar hides exactly what someone opened the dashboard to see.
+- **Token kinds are priced differently and must stay apart.** A cache read costs a tenth of an
+  input token, a one-hour cache write double one. Measured here, cache reads were 71% of the
+  figure — summing the kinds into one number makes the total meaningless.
+- **A cost figure must say what it is.** On a Claude subscription nobody pays per token, so the
+  amount is what those tokens would have cost at API rates: a measure of how heavy a session was,
+  and not a bill. `Billing` detects this from the local config; the UI prefixes it with `≈` and
+  spells it out. Showing it bare would be a confident lie, which is the failure mode this whole
+  project is built against.
+- **An unpriced model reports null, never zero.**
+- **Consumption against subscription limits is not knowable locally.** Claude Code keeps no record
+  of it; its own `/usage` fetches it live with the account credential. Rolling-window token totals
+  are the honest local approximation. Do not reach for that credential to fill the gap.
 - **Recording must never slow a collector.** `EventStore` queues and flushes on a scheduler, and
   drops the newest events if the queue fills rather than blocking. It also subscribes to the bus
   instead of the bus knowing about it, so storage stays invisible to the thing being stored.

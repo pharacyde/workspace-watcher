@@ -38,10 +38,12 @@ class UsageServiceTest {
     props.setWorkspace(workspace.toString());
     props.setClaudeHome(claudeHome.toString());
     props.setDatabase(tmp.resolve("state/events.db").toString());
+    // Pinned so the test does not depend on how the developer's own machine is billed.
+    props.setBilling("api");
 
     ObjectMapper mapper = new ObjectMapper();
     TranscriptLocator locator = new TranscriptLocator(props, new ActiveWorkspace(props));
-    usage = new UsageService(locator, new Pricing(mapper, props), mapper);
+    usage = new UsageService(locator, new Pricing(mapper, props), new Billing(props), mapper);
   }
 
   private void append(String model, long in, long out, long write5m, long write1h, long read)
@@ -118,6 +120,14 @@ class UsageServiceTest {
         .singleElement()
         .extracting(UsageService.ModelUsage::costUsd)
         .isNull();
+  }
+
+  @Test
+  @DisplayName("says whether a cost figure is money anyone actually pays")
+  void reportsBillingMode() throws IOException {
+    append("claude-opus-5", 1_000_000, 0, 0, 0, 0);
+    assertThat(usage.summarise(null).billedPerToken()).isTrue();
+    assertThat(usage.summarise(null).billingMode()).isEqualTo("api");
   }
 
   @Test

@@ -196,6 +196,30 @@ type UsageSummary {
   tokens: TokenUsage!
   "Null when any model involved is unpriced."
   costUsd: Float
+  """
+  Whether costUsd is money anyone actually pays.
+
+  False on a Claude subscription, where there is a flat fee and usage limits rather than a
+  per-token charge. The figure is then what these tokens would have cost at API rates: a measure
+  of how heavy a session was, and not a bill. Show it as such.
+  """
+  billedPerToken: Boolean!
+
+  "api or subscription. Detected from the local Claude config unless watcher.billing overrides it."
+  billingMode: String!
+
+  "Subscription tier when one is recorded locally, e.g. default_claude_max_20x."
+  plan: String
+
+  """
+  Tokens used across the workspace in the last five hours and seven days.
+
+  This is the shape a subscription's limits take, and it is consumption rather than headroom: how
+  much of an allowance remains is not recorded anywhere locally. Claude Code's own /usage command
+  fetches that live with the account credential.
+  """
+  last5h: TokenUsage!
+  last7d: TokenUsage!
 }
 
 type Status {
