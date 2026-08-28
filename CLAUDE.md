@@ -14,8 +14,8 @@ $JAVA_HOME/bin/java -jar target/workspace-watcher-0.1.0-SNAPSHOT.jar \
     --watcher.workspace=/path/to/observe
 ```
 
-Stack: Spring Boot 4.1.1, Java release 25, Maven. Compiled with `-Xlint:all`; keep the build
-warning-free.
+Stack: Spring Boot 4.1.1, Java release 25, Maven, Spring for GraphQL. Compiled with `-Xlint:all`;
+keep the build warning-free.
 
 Note Spring Boot 4 ships **Jackson 3**: the package is `tools.jackson.databind`, not
 `com.fasterxml.jackson.databind`. `asText()` and `isTextual()` are deprecated in favour of
@@ -37,6 +37,8 @@ These are the decisions the project exists to hold. Do not quietly relax them.
 4. **Loopback by default.** This app serves source diffs and command lines with no auth. Do not
    change `server.address` or add a feature that assumes a reachable port.
 5. **The process panel is a sampler and is documented as such.** Do not present it as complete.
+6. **GraphQL is the whole API.** No REST controllers, including for hooks — those post the
+   `recordAgentEvent` mutation. Schema lives in `src/main/resources/graphql/schema.graphqls`.
 
 ## Layout
 
@@ -47,7 +49,7 @@ be.kleisli.ww
 ├── fs       WorkspaceScanService (mtime+size snapshot poller)
 ├── git      GitService (shells out to git; no JGit)
 ├── proc     ProcessTreeService (lsof -a -d cwd + ProcessHandle)
-└── web      EventStreamController (SSE), ApiController
+└── web      WatchGraphQlController (queries, subscription, hook mutation), GqlEvent
 ```
 
 Frontend lives in `src/main/resources/static/` and is deliberately plain HTML/CSS/JS: no build step,
@@ -64,6 +66,11 @@ no CDN, works offline.
   the byte offset by exactly that much — otherwise a half-flushed line corrupts UTF-8 decoding.
 - **`lsof +D` is a trap.** It walks the entire tree on every call. `lsof -a -d cwd -F pn` returns all
   processes' working directories in one cheap call; filter in Java.
+- **The subscription must not have a gap.** `EventBus.stream()` snapshots history and registers the
+  live subscriber under the same lock `publish` holds while appending, then filters the overlap by
+  sequence number. Reordering that introduces a silent hole in the feed.
+- **`detail` is a JSON string, not a scalar.** Adding `graphql-java-extended-scalars` for one opaque
+  field is not worth it; see invariant 2 about not implying more structure than exists.
 - **Do not add JGit.** Shelling out to `git` is faster on large repositories and cannot drift from
   what the user sees in their own terminal.
 

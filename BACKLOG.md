@@ -92,9 +92,9 @@ Switch between project folders from a dropdown.
 ## Epic 5 — UX, multi-device & remote access
 
 **P5-01 WebSockets / SSE live updates with throttling** ✅
-*SSE, chosen over WebSockets: the stream is one-directional, it reconnects on its own, and it
-survives ordinary proxies and SSH tunnels untouched. Throttling under heavy file churn is still to
-do — see P9-02.*
+*Implemented as a GraphQL subscription over `graphql-ws`. The client is hand-rolled (about sixty
+lines) to keep the frontend build-step free. Throttling under heavy file churn is still to do — see
+P9-02.*
 
 **P5-02 Multi-monitor layout / detachable panels** 🟢
 
@@ -149,7 +149,12 @@ for replay (P7-03), for cross-session history, and for surviving a restart.
 
 **P9-02 Backpressure and throttling** 🟢
 A `npm install` produces tens of thousands of file events. The feed needs coalescing per path and a
-cap on SSE throughput before it meets a real build.
+throughput cap before it meets a real build. `EventBus.stream()` currently uses an unbounded
+`BUFFER` overflow strategy, which is the wrong answer for a slow client — replace it with a bounded
+buffer plus `Flux.bufferTimeout` coalescing.
+
+Also worth revisiting on the client: once the UI grows past a plain feed, RxJS for stream operators
+and a virtualised list are the two libraries that actually earn their weight here.
 
 **P9-03 Agent adapter interface** 🟢
 Layer 1 is Claude-Code-specific today. Make it an interface so Aider, Codex, OpenClaw, Gemini CLI

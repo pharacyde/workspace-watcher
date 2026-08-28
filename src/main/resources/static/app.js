@@ -1,3 +1,64 @@
+// GraphQL client, hand-rolled. Queries go over HTTP POST, the live feed over a graphql-ws
+// subscription. Roughly sixty lines, which is why there is no build step and no CDN here.
+
+const HTTP_ENDPOINT = '/graphql';
+const WS_ENDPOINT = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/graphql';
+
+async function query(document, variables = {}) {
+  const response = await fetch(HTTP_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: document, variables })
+  });
+  const result = await response.json();
+  if (result.errors) throw new Error(result.errors.map(e => e.message).join('; '));
+  return result.data;
+}
+
+/** Minimal graphql-transport-ws client with reconnect. */
+function subscribe(document, onNext, onStateChange) {
+  let socket, retry = 0, closed = false;
+
+  const connect = () => {
+    socket = new WebSocket(WS_ENDPOINT, 'graphql-transport-ws');
+
+    socket.addEventListener('open', () => socket.send(JSON.stringify({ type: 'connection_init' })));
+
+    socket.addEventListener('message', event => {
+      const message = JSON.parse(event.data);
+      switch (message.type) {
+        case 'connection_ack':
+          retry = 0;
+          onStateChange('live');
+          socket.send(JSON.stringify({ id: '1', type: 'subscribe', payload: { query: document } }));
+          break;
+        case 'ping':
+          socket.send(JSON.stringify({ type: 'pong' }));
+          break;
+        case 'next':
+          onNext(message.payload.data);
+          break;
+        case 'error':
+          console.error('subscription error', message.payload);
+          break;
+      }
+    });
+
+    socket.addEventListener('close', () => {
+      if (closed) return;
+      onStateChange('reconnecting');
+      // Back off, but stay responsive: a dashboard nobody is watching should not hammer the server.
+      retry = Math.min(retry + 1, 6);
+      setTimeout(connect, 250 * 2 ** retry);
+    });
+  };
+
+  connect();
+  return () => { closed = true; socket && socket.close(); };
+}
+
+// ---------------------------------------------------------------------------------------------
+
 const feedEl = document.getElementById('feed');
 const gitEl = document.getElementById('git');
 const diffEl = document.getElementById('diff');
@@ -14,32 +75,44 @@ let selectedPath = null;
 document.querySelectorAll('.filters input').forEach(box => {
   box.addEventListener('change', () => {
     box.checked ? enabled.add(box.dataset.source) : enabled.delete(box.dataset.source);
-    feedEl.querySelectorAll('.row').forEach(row => {
-      row.hidden = !enabled.has(row.dataset.source);
-    });
+    feedEl.querySelectorAll('.row').forEach(row => { row.hidden = !enabled.has(row.dataset.source); });
   });
 });
 
-fetch('/api/status').then(r => r.json()).then(status => {
-  document.getElementById('workspace').textContent = status.workspace;
-  if (!status.transcriptDirs.length) {
-    addRow({
-      seq: 0, ts: new Date().toISOString(), source: 'SYSTEM', type: 'WARN',
-      summary: 'no Claude Code transcripts found for this workspace — file events still work, ' +
-               'but nothing will be attributed to an agent'
-    });
-  }
-});
+const EVENT_FIELDS = 'seq ts source type summary path agent sessionId detail';
 
-const stream = new EventSource('/api/events');
-stream.addEventListener('open', () => { connEl.textContent = 'live'; connEl.className = 'pill live'; });
-stream.addEventListener('error', () => { connEl.textContent = 'reconnecting'; connEl.className = 'pill dim'; });
-stream.addEventListener('watch', e => handle(JSON.parse(e.data)));
+query(`{ status { workspace workspaceExists os transcriptDirs
+          git { repo branch head headSubject files { path status staged } }
+          processes { pid command cwd children { pid command cwd children { pid command cwd children { pid command cwd } } } } } }`)
+  .then(({ status }) => {
+    document.getElementById('workspace').textContent = status.workspace;
+    renderGit(status.git);
+    renderProcesses(status.processes);
+    if (!status.transcriptDirs.length) {
+      addRow({
+        seq: '0', ts: new Date().toISOString(), source: 'SYSTEM', type: 'WARN',
+        summary: 'no Claude Code transcripts found for this workspace — file events still work, ' +
+                 'but nothing will be attributed to an agent'
+      });
+    }
+  })
+  .catch(error => console.error(error));
+
+subscribe(
+  `subscription { events { ${EVENT_FIELDS} } }`,
+  data => handle(data.events),
+  state => { connEl.textContent = state; connEl.className = 'pill ' + (state === 'live' ? 'live' : 'dim'); }
+);
 
 function handle(event) {
-  if (event.source === 'GIT' && event.type === 'STATUS') renderGit(event.detail);
-  if (event.source === 'PROCESS' && event.type === 'SNAPSHOT') renderProcesses(event.detail);
+  const detail = event.detail ? safeParse(event.detail) : null;
+  if (event.source === 'GIT' && event.type === 'STATUS' && detail) renderGit(detail);
+  if (event.source === 'PROCESS' && event.type === 'SNAPSHOT' && detail) renderProcesses(detail);
   addRow(event);
+}
+
+function safeParse(text) {
+  try { return JSON.parse(text); } catch { return null; }
 }
 
 function addRow(event) {
@@ -86,14 +159,14 @@ function renderGit(snapshot) {
   if (!snapshot || !snapshot.repo) {
     branchEl.textContent = '';
     gitSummaryEl.textContent = 'not a git repository';
-    gitEl.innerHTML = '<p class="empty">not a git repository</p>';
+    gitEl.replaceChildren(empty('not a git repository'));
     return;
   }
   branchEl.textContent = snapshot.branch + (snapshot.head ? ' @ ' + snapshot.head : '');
   gitSummaryEl.textContent = snapshot.headSubject || '';
   gitEl.replaceChildren();
   if (!snapshot.files.length) {
-    gitEl.innerHTML = '<p class="empty">clean</p>';
+    gitEl.replaceChildren(empty('clean'));
     return;
   }
   for (const file of snapshot.files) {
@@ -109,22 +182,20 @@ function showDiff(path) {
   selectedPath = path;
   diffPathEl.textContent = path;
   gitEl.querySelectorAll('.file').forEach(f => f.classList.toggle('selected', f.textContent.endsWith(path)));
-  fetch('/api/diff?path=' + encodeURIComponent(path))
-    .then(r => r.json())
-    .then(result => {
-      const text = [result.staged, result.unstaged].filter(Boolean).join('\n');
-      diffEl.replaceChildren();
+
+  query('query($path: String!) { diff(path: $path) { staged unstaged } }', { path })
+    .then(({ diff }) => {
+      const text = [diff.staged, diff.unstaged].filter(Boolean).join('\n');
       if (!text.trim()) {
-        diffEl.innerHTML = '<p class="empty">no diff (file may be unchanged or ignored by git)</p>';
+        diffEl.replaceChildren(empty('no diff (file may be unchanged or ignored by git)'));
         return;
       }
       const pre = document.createElement('pre');
       pre.className = 'diff';
-      for (const line of text.split('\n')) {
-        pre.append(span(diffClass(line), line + '\n'));
-      }
-      diffEl.append(pre);
-    });
+      for (const line of text.split('\n')) pre.append(span(diffClass(line), line + '\n'));
+      diffEl.replaceChildren(pre);
+    })
+    .catch(error => diffEl.replaceChildren(empty(error.message)));
 }
 
 function diffClass(line) {
@@ -137,9 +208,8 @@ function diffClass(line) {
 }
 
 function renderProcesses(tree) {
-  procEl.replaceChildren();
   if (!tree || !tree.length) {
-    procEl.innerHTML = '<p class="empty">no processes with a working directory inside this workspace</p>';
+    procEl.replaceChildren(empty('no processes with a working directory inside this workspace'));
     return;
   }
   const container = document.createElement('div');
@@ -154,5 +224,12 @@ function renderProcesses(tree) {
     }
   };
   walk(tree, 0);
-  procEl.append(container);
+  procEl.replaceChildren(container);
+}
+
+function empty(text) {
+  const p = document.createElement('p');
+  p.className = 'empty';
+  p.textContent = text;
+  return p;
 }

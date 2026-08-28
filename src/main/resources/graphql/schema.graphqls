@@ -1,0 +1,102 @@
+"A single observation about the workspace."
+type WatchEvent {
+  seq: ID!
+  "ISO-8601 instant."
+  ts: String!
+  """
+  How this event is known. TRANSCRIPT and HOOK carry real attribution straight from the agent;
+  FS and PROCESS are the generic safety net and claim no actor.
+  """
+  source: Source!
+  "CREATED, MODIFIED, TOOL_USE, TOOL_ERROR, STATUS, SNAPSHOT, …"
+  type: String!
+  summary: String
+  "Workspace-relative path, when the event is about one file."
+  path: String
+  pid: ID
+  "Which agent produced this, when known. Always null for FS and PROCESS events."
+  agent: String
+  sessionId: String
+  "Raw payload as a JSON string. Shape depends on source; treat as opaque."
+  detail: String
+}
+
+enum Source {
+  "Parsed from an agent's own session transcript. Attribution is exact."
+  TRANSCRIPT
+  "Pushed by an agent hook at the moment of the action. Attribution is exact."
+  HOOK
+  "Raw filesystem change. No actor is known - do not guess one."
+  FS
+  "Git working-tree state."
+  GIT
+  "Process tree snapshot. Sampled, therefore incomplete by nature."
+  PROCESS
+  "The watcher talking about itself."
+  SYSTEM
+}
+
+type FileStatus {
+  path: String!
+  "untracked, modified, added, deleted or renamed."
+  status: String!
+  staged: Boolean!
+}
+
+type GitSnapshot {
+  repo: Boolean!
+  branch: String
+  head: String
+  headSubject: String
+  files: [FileStatus!]!
+}
+
+type ProcessNode {
+  pid: ID!
+  command: String!
+  cwd: String!
+  children: [ProcessNode!]!
+}
+
+type Diff {
+  path: String!
+  staged: String!
+  unstaged: String!
+}
+
+type Status {
+  workspace: String!
+  workspaceExists: Boolean!
+  os: String!
+  "Transcript directories being tailed. Empty means nothing will be attributed to an agent."
+  transcriptDirs: [String!]!
+  git: GitSnapshot!
+  processes: [ProcessNode!]!
+}
+
+type Query {
+  status: Status!
+  "Unified diff for one workspace-relative path. Paths outside the workspace are rejected."
+  diff(path: String!): Diff!
+  "Most recent events from the in-memory buffer, oldest first."
+  recentEvents(limit: Int = 200): [WatchEvent!]!
+}
+
+type Mutation {
+  """
+  Records an agent hook payload. The payload is the agent's raw hook JSON, base64-encoded:
+  that keeps the shell side free of quoting bugs and needs no jq or python on the host.
+
+  Always returns true. An observer must never be able to block or alter the agent it watches,
+  so a malformed payload is recorded as-is rather than rejected.
+  """
+  recordAgentEvent(payloadBase64: String!): Boolean!
+}
+
+type Subscription {
+  """
+  Live event stream. Replays the buffered history first, so a dashboard opened mid-session is
+  never blank, then continues with live events without duplicating any.
+  """
+  events: WatchEvent!
+}

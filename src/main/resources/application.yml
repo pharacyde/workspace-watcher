@@ -7,6 +7,19 @@ server:
 spring:
   application:
     name: workspace-watcher
+  graphql:
+    # GraphQL is the whole API: queries over HTTP POST, the live feed over a graphql-ws
+    # subscription. There is no REST surface.
+    path: /graphql
+    websocket:
+      path: /graphql
+    graphiql:
+      # Schema explorer at http://127.0.0.1:8080/graphiql - safe here because the app is
+      # loopback-only, but reconsider if that ever changes.
+      enabled: true
+    schema:
+      printer:
+        enabled: true
 
 watcher:
   # Override with --watcher.workspace=/path/to/project

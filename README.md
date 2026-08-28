@@ -58,13 +58,34 @@ java -jar target/workspace-watcher-0.1.0-SNAPSHOT.jar --watcher.workspace=/path/
 ```
 
 Open <http://127.0.0.1:8080>. Then, in your own terminal, `cd` to that project and start Claude Code
-as you normally would.
+as you normally would. The schema explorer sits at <http://127.0.0.1:8080/graphiql>.
 
 If your default `java` is older than 25:
 
 ```bash
 JAVA_HOME=$(/usr/libexec/java_home -v 25) mvn -DskipTests package
 ```
+
+## API
+
+GraphQL is the entire API — there is no REST surface. Queries go over HTTP POST to `/graphql`, and
+the live feed is a `graphql-ws` subscription on the same path.
+
+```graphql
+{ status { workspace transcriptDirs
+           git { branch files { path status } }
+           processes { pid command children { pid command } } } }
+
+query { diff(path: "src/main/java/be/kleisli/ww/git/GitService.java") { staged unstaged } }
+
+subscription { events { seq ts source type summary path agent sessionId detail } }
+```
+
+`source` is the field worth reading first: `TRANSCRIPT` and `HOOK` carry real attribution, `FS` and
+`PROCESS` deliberately do not.
+
+`detail` is a JSON string rather than a typed object. Its shape genuinely varies per source, so
+typing it would either lie or drag in a scalar library for a field the UI treats as opaque.
 
 ## Hooks (optional, lower latency)
 
@@ -84,8 +105,11 @@ moment they happen, install the hook:
 }
 ```
 
-The script always exits 0 and ignores errors. An observer must never be able to block or alter the
-agent it is watching.
+The script base64-encodes the payload from stdin and posts it as the `recordAgentEvent` mutation.
+Base64 sidesteps every shell and JSON quoting problem without needing `jq` or `python` on the host.
+
+It always exits 0 and discards all output. A hook blocks the agent until it returns, and an observer
+must never be able to block or alter the agent it is watching.
 
 ## Configuration
 
@@ -101,6 +125,7 @@ Any property can be passed as `--watcher.foo=bar` or set in `application.yml`.
 | `watcher.history-size` | `2000` | events replayed to a newly opened dashboard |
 | `watcher.ignore-dirs` | `.git`, `node_modules`, `target`, … | never descended into |
 | `server.address` | `127.0.0.1` | **see Security** |
+| `spring.graphql.graphiql.enabled` | `true` | schema explorer at `/graphiql` |
 
 ## Security
 
@@ -136,14 +161,15 @@ be.kleisli.ww
 ├── fs       WorkspaceScanService (layer 2)
 ├── git      GitService — shells out to git rather than embedding JGit
 ├── proc     ProcessTreeService — lsof + ProcessHandle
-└── web      EventStreamController (SSE), ApiController (/api/status, /api/diff)
+└── web      WatchGraphQlController (queries, subscription, hook mutation), GqlEvent
 ```
 
-Server-Sent Events rather than WebSockets: the stream is one-directional, it reconnects by itself,
-and it passes through SSH tunnels and ordinary proxies without configuration.
+The subscription replays the buffered history before going live, so a dashboard opened mid-session
+is never blank. Snapshot and subscription are taken under one lock, and overlap is removed by
+sequence number: a duplicate is cheap, a gap is not.
 
-The frontend is plain HTML, CSS and JavaScript with no build step and no CDN — it works offline and
-stays readable.
+The frontend is plain HTML, CSS and JavaScript with no build step and no CDN — including a
+hand-rolled `graphql-transport-ws` client of about sixty lines. It works offline and stays readable.
 
 ## Roadmap
 
