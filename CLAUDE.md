@@ -80,6 +80,9 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
 - **Events are batched onto one animation frame.** A build produces thousands of events per second;
   updating per event spends the whole frame budget on layout. The feed is virtualised for the same
   reason. The transport is never the bottleneck here - the DOM is.
+- **HTTPS is switched on by a keystore existing**, not by a flag - one act, nothing to forget.
+  `scripts/dev-cert.sh` writes it. A self-signed certificate encrypts fine and is trusted by
+  nothing; only mkcert's makes Safari treat the origin as one it will grant notifications on.
 - **Notifications must degrade, not fail.** Safari refuses them on a plain http origin, so the
   title badge runs regardless and the button says which you are getting. A feature that works in
   some browsers is worse than one that always does something.

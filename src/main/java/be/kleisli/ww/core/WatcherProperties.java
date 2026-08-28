@@ -82,6 +82,18 @@ public class WatcherProperties {
    */
   private String billing = "auto";
 
+  /**
+   * PKCS12 keystore to serve HTTPS from. HTTP is used when the file is absent.
+   *
+   * <p>Switched on by the file existing rather than by a flag, so generating a certificate is the
+   * whole act of enabling it and there is no second step to forget.
+   */
+  private String keystore =
+      System.getProperty("user.home") + "/.claude/workspace-watcher/keystore.p12";
+
+  /** Password for that keystore. A local development certificate; it protects nothing remote. */
+  private String keystorePassword = "workspace-watcher";
+
   /** How long recorded history is kept. */
   private int retentionDays = 30;
 
@@ -199,6 +211,22 @@ public class WatcherProperties {
 
   public void setBilling(String billing) {
     this.billing = billing;
+  }
+
+  public String getKeystore() {
+    return keystore;
+  }
+
+  public void setKeystore(String keystore) {
+    this.keystore = keystore;
+  }
+
+  public String getKeystorePassword() {
+    return keystorePassword;
+  }
+
+  public void setKeystorePassword(String keystorePassword) {
+    this.keystorePassword = keystorePassword;
   }
 
   public int getMaxSessions() {

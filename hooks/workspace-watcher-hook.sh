@@ -18,6 +18,10 @@
 # Set WORKSPACE_WATCHER_URL to post the GraphQL mutation instead. That is for the case the spool
 # cannot cover: a watcher running on a different host than the agent.
 #
+# The spool path is unaffected by the watcher serving HTTPS - it writes a file, not a request.
+# Only WORKSPACE_WATCHER_URL needs the https:// scheme, and a self-signed certificate additionally
+# needs curl's --cacert or -k, which is a good reason to prefer the spool.
+#
 # Install per project in .claude/settings.json, or once in ~/.claude/settings.json to observe every
 # project. Global installation is safe: the spool is namespaced per project and prunes itself, so a
 # watcher only ever sees events from the workspace it is watching.

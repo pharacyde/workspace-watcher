@@ -252,6 +252,25 @@ someone is reading should not lose its scroll position and filters without being
 `index.html` is served `no-store` while the content-hashed assets keep a year, so an ordinary
 refresh is always enough; a hard refresh should never be needed.
 
+### HTTPS
+
+```bash
+./scripts/dev-cert.sh
+```
+
+The watcher serves HTTPS as soon as a keystore exists and plain HTTP when it does not, so making a
+certificate is the whole act of enabling it and deleting it is how you go back.
+
+Which tool the script finds matters more than it looks. **mkcert** installs a certificate authority
+into the system keychain and issues from it, so the browser trusts the result completely — that is
+what Safari wants before it will grant notifications. **openssl**, the fallback, is exactly as good
+at encrypting and trusted by nothing: you get a warning every time and Safari still refuses. Install
+mkcert (`brew install mkcert`) if the Safari behaviour is the point; the fallback is there so HTTPS
+works without installing anything.
+
+The spool path is unaffected either way — it writes a file, not a request. Only a remote
+`WORKSPACE_WATCHER_URL` needs the scheme changed.
+
 ### Notifications
 
 Failures, guard blocks and finished agents are announced while the tab is in the background, and
