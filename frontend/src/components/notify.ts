@@ -17,6 +17,50 @@ const LABELS: Record<Mode, string> = {
 const BASE_TITLE = 'workspace-watcher';
 
 /**
+ * A short two-note tone as a WAV data URI.
+ *
+ * <p>Built here rather than shipped as a file: it is forty lines of arithmetic against an asset
+ * that has to be served, cached and kept in step with the bundle.
+ */
+const TONE = (() => {
+  const rate = 44100;
+  const seconds = 0.22;
+  const samples = Math.floor(rate * seconds);
+  const bytes = new Uint8Array(44 + samples * 2);
+  const view = new DataView(bytes.buffer);
+  const ascii = (offset: string, at: number) => {
+    for (let i = 0; i < offset.length; i++) view.setUint8(at + i, offset.charCodeAt(i));
+  };
+
+  ascii('RIFF', 0);
+  view.setUint32(4, 36 + samples * 2, true);
+  ascii('WAVE', 8);
+  ascii('fmt ', 12);
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  ascii('data', 36);
+  view.setUint32(40, samples * 2, true);
+
+  for (let i = 0; i < samples; i++) {
+    const t = i / rate;
+    // Two notes, and a short fade so it ends rather than clicks.
+    const frequency = t < seconds / 2 ? 660 : 880;
+    const fade = Math.min(1, (seconds - t) * 12);
+    const value = Math.sin(2 * Math.PI * frequency * t) * 0.4 * fade;
+    view.setInt16(44 + i * 2, value * 0x7fff, true);
+  }
+
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:audio/wav;base64,${btoa(binary)}`;
+})();
+
+/**
  * Draws the tab icon, with a dot when something is waiting.
  *
  * <p>Drawn rather than shipped, so there is no asset to load or get wrong, and so the badge is a
@@ -90,6 +134,8 @@ export class Notify extends LitElement {
   private suppressed = 0;
   /** Counted while the tab is in the background, shown in the title, cleared on return. */
   private missed = 0;
+  /** Created and unlocked during a click, kept for the life of the page. */
+  private audio: HTMLAudioElement | null = null;
 
   static styles = css`
     button {
@@ -122,6 +168,13 @@ export class Notify extends LitElement {
     super.connectedCallback();
     this.release = subscribe(EventsDocument, (data) => this.consider(data.events));
     document.addEventListener('visibilitychange', this.onVisibility);
+    // Sound survives a reload as a preference, but an audio context cannot: it may only be opened
+    // during a gesture. Without this the setting would say "sound" and stay silent after every
+    // reload, which is the worst kind of broken - the one that looks configured correctly.
+    if (this.mode === 'sound') {
+      document.addEventListener('click', this.openAudio, { once: true });
+      document.addEventListener('keydown', this.openAudio, { once: true });
+    }
     // There is no favicon file; the tab shows a blank page icon until this runs.
     paintIcon(false);
   }
@@ -131,6 +184,24 @@ export class Notify extends LitElement {
     this.release?.();
     document.removeEventListener('visibilitychange', this.onVisibility);
   }
+
+  private openAudio = () => {
+    if (this.audio) return;
+    const element = new Audio(TONE);
+    element.volume = 0.35;
+    // Played once during the gesture to unlock it. Safari allows later plays from a background tab
+    // only if the element has already played while the page was interactive.
+    element.muted = true;
+    void element
+      .play()
+      .then(() => {
+        element.pause();
+        element.muted = false;
+        element.currentTime = 0;
+      })
+      .catch(() => undefined);
+    this.audio = element;
+  };
 
   private onVisibility = () => {
     if (document.hidden) return;
@@ -187,26 +258,30 @@ export class Notify extends LitElement {
     if (this.mode === 'sound') this.beep();
   }
 
-  /** A short tone from the audio context, so there is no asset to ship or fail to load. */
+  /**
+   * A short tone, played through an audio element.
+   *
+   * <p>Not an AudioContext, which is where this started: Safari suspends those in background tabs,
+   * and a background tab is exactly the situation this feature exists for. The counter in the title
+   * kept rising while nothing was audible - the events were arriving fine, the audio was asleep.
+   *
+   * <p>Still synthesised rather than shipped: the WAV is built as a data URI, so there is no asset
+   * to load or get wrong.
+   */
   private beep() {
-    try {
-      const context = new AudioContext();
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.frequency.value = 660;
-      gain.gain.setValueAtTime(0.05, context.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.25);
-      oscillator.connect(gain).connect(context.destination);
-      oscillator.start();
-      oscillator.stop(context.currentTime + 0.25);
-      oscillator.onended = () => void context.close();
-    } catch {
+    const element = this.audio;
+    if (!element) return;
+    element.currentTime = 0;
+    void element.play().catch(() => {
       // A browser that will not make a sound is not a reason to lose the notification.
-    }
+    });
   }
 
   private async cycle() {
     const next = MODES[(MODES.indexOf(this.mode) + 1) % MODES.length];
+
+    // Opened here, inside the click, because this is the gesture Safari requires.
+    if (next === 'sound') this.openAudio();
     if (next !== 'off' && typeof Notification !== 'undefined') {
       if (Notification.permission === 'default') {
         // Permission has to be asked from a click; asking on load is what gets a site blocked.
