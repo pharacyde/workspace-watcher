@@ -1,0 +1,25 @@
+target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# macOS
+.DS_Store
+
+# IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+nbproject/
+.settings/
+.classpath
+.project
+
+# Claude Code local state
+.claude/settings.local.json
+
+# Local overrides
+application-local.yml
+*.local.yml

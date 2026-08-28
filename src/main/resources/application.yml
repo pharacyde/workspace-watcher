@@ -1,0 +1,22 @@
+server:
+  # Loopback only. This dashboard exposes source diffs and command lines; reach a remote
+  # instance through an SSH tunnel or a private overlay network, never an open port.
+  address: 127.0.0.1
+  port: 8080
+
+spring:
+  application:
+    name: workspace-watcher
+
+watcher:
+  # Override with --watcher.workspace=/path/to/project
+  workspace: ${user.dir}
+  claude-home: ${user.home}/.claude
+  fs-poll-ms: 750
+  transcript-poll-ms: 500
+  process-poll-ms: 2000
+  history-size: 2000
+
+logging:
+  level:
+    be.kleisli.ww: INFO
