@@ -145,7 +145,7 @@ scrubbing back through what an agent did over an hour is something no existing t
 
 ## Epic 8 — Notifications & interactivity
 
-**P8-01 Sound & browser push notifications** 🟢
+**P8-01 Sound & browser push notifications** ✅
 
 **P8-02 Human-in-the-loop approval from the dashboard** 🟡
 *Possible, and the mechanism already exists: a `PreToolUse` hook blocks until it returns, so it can

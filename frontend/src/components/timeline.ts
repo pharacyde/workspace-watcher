@@ -1,8 +1,21 @@
 import { css, html, LitElement } from 'lit';
 import { request } from '../api/client';
-import { ActivityDocument } from '../api/documents';
+import { ActivityDocument, TokenActivityDocument } from '../api/documents';
 
 type Bucket = { index: number; from: string; count: number; agentCount: number };
+
+/**
+ * Which series the timeline draws.
+ *
+ * <p>Two questions that look alike and are not: a hundred file events and one enormous prompt are
+ * indistinguishable in a count of events, and nothing alike in what they cost.
+ */
+type Metric = 'events' | 'tokens';
+
+const METRICS: { id: Metric; label: string; hint: string }[] = [
+  { id: 'events', label: 'events', hint: 'All events, with the share an agent caused drawn on top' },
+  { id: 'tokens', label: 'tokens', hint: 'Tokens consumed, with output tokens drawn on top' },
+];
 
 const WINDOWS: { label: string; seconds: number }[] = [
   { label: '1h', seconds: 3600 },
@@ -26,11 +39,13 @@ export class Timeline extends LitElement {
     windowSeconds: { state: true },
     buckets: { state: true },
     selected: { state: true },
+    metric: { state: true },
   };
 
   declare private windowSeconds: number;
   declare private buckets: Bucket[];
   declare private selected: number | null;
+  declare private metric: Metric;
 
   private timer?: number;
 
@@ -41,7 +56,7 @@ export class Timeline extends LitElement {
       border-top: 1px solid var(--line);
       background: var(--panel);
       flex: none;
-      height: 78px;
+      height: 76px;
     }
     header {
       display: flex;
@@ -53,6 +68,13 @@ export class Timeline extends LitElement {
       text-transform: uppercase;
       letter-spacing: 0.8px;
       font-weight: 600;
+    }
+    .metrics {
+      display: flex;
+      gap: 4px;
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 400;
     }
     .windows {
       margin-left: auto;
@@ -123,6 +145,7 @@ export class Timeline extends LitElement {
     this.windowSeconds = 3600;
     this.buckets = [];
     this.selected = null;
+    this.metric = 'events';
   }
 
   connectedCallback(): void {
@@ -139,13 +162,23 @@ export class Timeline extends LitElement {
   private async refresh() {
     const until = new Date();
     const since = new Date(until.getTime() - this.windowSeconds * 1000);
+    const range = { since: since.toISOString(), until: until.toISOString(), buckets: BUCKETS };
     try {
-      const { activity } = await request(ActivityDocument, {
-        since: since.toISOString(),
-        until: until.toISOString(),
-        buckets: BUCKETS,
-      });
-      this.buckets = activity as Bucket[];
+      if (this.metric === 'tokens') {
+        const { tokenActivity } = await request(TokenActivityDocument, range);
+        // Mapped onto the same shape so one renderer draws both: a total, and a highlighted share
+        // of it. For events that share is what an agent caused; for tokens it is output, which is
+        // the expensive half.
+        this.buckets = tokenActivity.map((b) => ({
+          index: b.index,
+          from: b.from,
+          count: b.total,
+          agentCount: b.output,
+        }));
+      } else {
+        const { activity } = await request(ActivityDocument, range);
+        this.buckets = activity as Bucket[];
+      }
     } catch {
       this.buckets = [];
     }
@@ -180,7 +213,23 @@ export class Timeline extends LitElement {
 
     return html`
       <header>
-        Timeline
+        <span class="metrics">
+          ${METRICS.map(
+            (m) => html`
+              <button
+                class=${this.metric === m.id ? 'on' : ''}
+                title=${m.hint}
+                @click=${() => {
+                  this.metric = m.id;
+                  this.buckets = [];
+                  this.refresh();
+                }}
+              >
+                ${m.label}
+              </button>
+            `,
+          )}
+        </span>
         ${this.selected !== null
           ? html`<button class="live" @click=${this.goLive}>● back to live</button>`
           : ''}
@@ -202,7 +251,7 @@ export class Timeline extends LitElement {
         </span>
       </header>
       ${this.buckets.length === 0
-        ? html`<p class="empty">no recorded activity in this window</p>`
+        ? html`<p class="empty">no recorded ${this.metric} in this window</p>`
         : html`
             <div class="bars">
               ${Array.from({ length: BUCKETS }, (_, index) => {
@@ -219,7 +268,7 @@ export class Timeline extends LitElement {
                 return html`
                   <div
                     class="slot ${this.selected === index ? 'selected' : ''}"
-                    title="${new Date(bucket.from).toLocaleTimeString('en-GB', { hour12: false })} — ${bucket.count} events, ${bucket.agentCount} by an agent"
+                    title="${new Date(bucket.from).toLocaleTimeString('en-GB', { hour12: false })} — ${this.metric === 'tokens' ? `${bucket.count.toLocaleString()} tokens, ${bucket.agentCount.toLocaleString()} output` : `${bucket.count} events, ${bucket.agentCount} by an agent`}"
                     @click=${() => this.select(bucket)}
                   >
                     <div class="total" style="height:${Math.max(total - agent, bucket.count ? 1 : 0)}%"></div>

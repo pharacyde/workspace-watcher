@@ -116,6 +116,21 @@ public class ApiMapper {
         .build();
   }
 
+  public List<be.kleisli.ww.generated.types.TokenBucket> toTokenActivity(
+      List<be.kleisli.ww.usage.UsageService.Bucket> buckets) {
+    return buckets.stream()
+        .map(
+            bucket ->
+                be.kleisli.ww.generated.types.TokenBucket.newBuilder()
+                    .index(bucket.index())
+                    .from(bucket.from())
+                    .total((double) bucket.total())
+                    .output((double) bucket.output())
+                    .cacheRead((double) bucket.cacheRead())
+                    .build())
+        .toList();
+  }
+
   public List<ActivityBucket> toActivity(List<EventStore.Bucket> buckets) {
     return buckets.stream()
         .map(

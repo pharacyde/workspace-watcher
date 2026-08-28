@@ -182,7 +182,7 @@ public class TranscriptTailService {
         WatchEvent.of(WatchEvent.Source.TRANSCRIPT, error ? "TOOL_ERROR" : "TOOL_RESULT")
             .agent("claude-code")
             .session(session)
-            .summary(label == null ? "result" : label)
+            .summary(label != null ? label : firstLine(body))
             .detail("output", Text.truncate(body, Text.DETAIL_LIMIT)));
   }
 
@@ -217,6 +217,19 @@ public class TranscriptTailService {
     return workspace != null && path.startsWith(workspace)
         ? workspace.relativize(path).toString()
         : raw;
+  }
+
+  /**
+   * A usable summary for a result whose call we never saw.
+   *
+   * <p>Happens when the watcher starts mid-session: the tool_use was already history by the time we
+   * began tailing. Saying "result" tells nobody anything, and it is the line a notification quotes.
+   */
+  private static String firstLine(String body) {
+    if (body == null || body.isBlank()) {
+      return "result";
+    }
+    return Text.truncate(body.strip().lines().findFirst().orElse("result"), 120);
   }
 
   /** Exposed for the status endpoint so the UI can say whether layer 1 is actually live. */

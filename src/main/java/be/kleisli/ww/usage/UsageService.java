@@ -195,6 +195,58 @@ public class UsageService {
     }
   }
 
+  /** Tokens in one slice of a timeline, split the way the cost is. */
+  public record Bucket(int index, String from, long total, long output, long cacheRead) {}
+
+  /**
+   * Token use over a range, bucketed for a timeline.
+   *
+   * <p>A different question from event density: a hundred file events and one enormous prompt look
+   * alike in a count of events and nothing alike in what they cost.
+   */
+  public List<Bucket> activity(String since, String until, int buckets) {
+    long from;
+    long to;
+    try {
+      from = Instant.parse(since).getEpochSecond();
+      to = Instant.parse(until).getEpochSecond();
+    } catch (RuntimeException e) {
+      return List.of();
+    }
+    int slices = Math.clamp(buckets, 1, 2000);
+    long width = Math.max(1, (to - from) / slices);
+
+    Map<Integer, long[]> sums = new LinkedHashMap<>();
+    for (Path transcript : locator.transcripts()) {
+      read(transcript);
+      Cached cached = cache.get(transcript);
+      if (cached == null) {
+        continue;
+      }
+      for (Entry entry : cached.recent()) {
+        if (entry.epochSecond() < from || entry.epochSecond() >= to) {
+          continue;
+        }
+        int index = (int) ((entry.epochSecond() - from) / width);
+        long[] slot = sums.computeIfAbsent(index, k -> new long[3]);
+        slot[0] += entry.tokens().total();
+        slot[1] += entry.tokens().output();
+        slot[2] += entry.tokens().cacheRead();
+      }
+    }
+    return sums.entrySet().stream()
+        .sorted(Map.Entry.comparingByKey())
+        .map(
+            e ->
+                new Bucket(
+                    e.getKey(),
+                    Instant.ofEpochSecond(from + (long) e.getKey() * width).toString(),
+                    e.getValue()[0],
+                    e.getValue()[1],
+                    e.getValue()[2]))
+        .toList();
+  }
+
   /**
    * Tokens used in the last {@code seconds}, across every session in the workspace.
    *

@@ -152,6 +152,13 @@ public class WatchDataFetcher {
     return mapper.toUsage(usage.summarise(sessionId));
   }
 
+  /** Token use over a range, bucketed for a timeline. */
+  @DgsQuery
+  public List<be.kleisli.ww.generated.types.TokenBucket> tokenActivity(
+      @InputArgument String since, @InputArgument String until, @InputArgument Integer buckets) {
+    return mapper.toTokenActivity(usage.activity(since, until, buckets == null ? 240 : buckets));
+  }
+
   /** Guard rules, and whether they are enforced or only observed. */
   @DgsQuery
   public GuardConfig guard() {

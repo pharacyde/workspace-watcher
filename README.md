@@ -79,10 +79,9 @@ the result into the jar. Use `-DskipFrontend` to build the backend alone.
 Open <http://127.0.0.1:8080>. Then, in your own terminal, `cd` to a project and start Claude Code as
 you normally would.
 
-A timeline runs along the bottom. It draws two densities, not one: file events dwarf everything
-else - a checkout is thousands of them - so a single total would say "something happened" for
-every branch switch and nothing about the agent. The agent-caused share is drawn on top in its own
-colour. Click a slice to scrub back into it; the activity panel becomes a replay of that moment,
+A timeline runs directly under the header. Pick what it draws: **events** or **tokens**. They look
+alike and are not — a hundred file events and one enormous prompt are indistinguishable in a count
+of events, and nothing alike in what they cost. Each series draws two densities rather than one: Click a slice to scrub back into it; the activity panel becomes a replay of that moment,
 read from the database rather than the buffer, so it reaches back past what the live stream still
 holds. A button returns you to live.
 

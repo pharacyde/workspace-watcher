@@ -170,6 +170,18 @@ export const ActivityDocument = graphql(`
   }
 `);
 
+export const TokenActivityDocument = graphql(`
+  query TokenActivity($since: String!, $until: String!, $buckets: Int!) {
+    tokenActivity(since: $since, until: $until, buckets: $buckets) {
+      index
+      from
+      total
+      output
+      cacheRead
+    }
+  }
+`);
+
 export const HistoryDocument = graphql(`
   query History($since: String!, $until: String!, $limit: Int!) {
     history(since: $since, until: $until, limit: $limit) {

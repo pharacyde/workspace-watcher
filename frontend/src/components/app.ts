@@ -12,6 +12,7 @@ import './feed';
 import './git-panel';
 import './process-panel';
 import './timeline';
+import './notify';
 import './usage';
 
 export class App extends LitElement {
@@ -214,6 +215,7 @@ export class App extends LitElement {
           title="Filters the activity feed, the working tree and the process list at once"
           @input=${(e: Event) => (this.search = (e.target as HTMLInputElement).value)}
         />
+        <ww-notify></ww-notify>
         <ww-usage></ww-usage>
         ${this.hasTranscripts
           ? ''
@@ -223,13 +225,13 @@ export class App extends LitElement {
               >no agent transcripts</span
             >`}
       </header>
+      <ww-timeline></ww-timeline>
       <main>
         <ww-process-panel .search=${this.search}></ww-process-panel>
         <ww-feed .search=${this.search} .replay=${this.replay} .workspace=${this.active.value?.activeWorkspace ?? null}></ww-feed>
         <ww-git-panel .selected=${this.selected} .search=${this.search}></ww-git-panel>
         <ww-diff-panel .path=${this.selected} .event=${this.selectedEvent}></ww-diff-panel>
       </main>
-      <ww-timeline></ww-timeline>
     `;
   }
 }

@@ -160,6 +160,15 @@ type SessionEntry {
   live: Boolean!
 }
 
+"Tokens in one slice of a timeline, split the way the cost is."
+type TokenBucket {
+  index: Int!
+  from: String!
+  total: Float!
+  output: Float!
+  cacheRead: Float!
+}
+
 "How many events fell in one slice of a timeline, and how many of those an agent caused."
 type ActivityBucket {
   index: Int!
@@ -256,6 +265,14 @@ type Query {
     until: String!
     buckets: Int = 240
   ): [ActivityBucket!]!
+
+  """
+  Token use over a range, bucketed for a timeline.
+
+  A different question from event density: a hundred file events and one enormous prompt look alike
+  in a count of events and nothing alike in what they cost.
+  """
+  tokenActivity(since: String!, until: String!, buckets: Int = 240): [TokenBucket!]!
 
   """
   Tokens and cost for one session, or for the whole workspace when sessionId is omitted.
