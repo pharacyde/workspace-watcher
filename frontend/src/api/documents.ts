@@ -10,6 +10,7 @@ export const StatusDocument = graphql(`
       workspace
       workspaceExists
       os
+      buildId
       transcriptDirs
     }
   }

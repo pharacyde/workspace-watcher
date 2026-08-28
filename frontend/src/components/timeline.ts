@@ -84,6 +84,9 @@ export class Timeline extends LitElement {
   declare private selected: number | null;
 
   private timer?: number;
+  /** Only the newest refresh may write. Toggling twice quickly started two, and the slower one
+   * finished last and overwrote the other's series with an empty one. */
+  private generation = 0;
 
   static styles = css`
     :host {
@@ -192,6 +195,7 @@ export class Timeline extends LitElement {
   }
 
   private async refresh() {
+    const generation = ++this.generation;
     const until = new Date();
     const since = new Date(until.getTime() - this.windowSeconds * 1000);
     const range = { since: since.toISOString(), until: until.toISOString(), buckets: BUCKETS };
@@ -237,6 +241,7 @@ export class Timeline extends LitElement {
 
     try {
       await Promise.all(jobs);
+      if (generation !== this.generation) return;
       this.data = next;
     } catch {
       // A failed refresh keeps the previous picture rather than blanking it.

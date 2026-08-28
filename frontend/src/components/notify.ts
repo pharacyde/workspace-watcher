@@ -14,6 +14,8 @@ const LABELS: Record<Mode, string> = {
   sound: '🔔 notify + sound',
 };
 
+const BASE_TITLE = 'workspace-watcher';
+
 const STORAGE_KEY = 'ww-notify-mode';
 
 /** Nothing older than this is announced, so replayed history cannot set off a burst on connect. */
@@ -40,6 +42,8 @@ export class Notify extends LitElement {
   private release?: () => void;
   private lastAt = 0;
   private suppressed = 0;
+  /** Counted while the tab is in the background, shown in the title, cleared on return. */
+  private missed = 0;
 
   static styles = css`
     button {
@@ -57,8 +61,8 @@ export class Notify extends LitElement {
       border-color: var(--accent);
     }
     button.denied {
-      color: var(--del);
-      border-color: var(--del);
+      color: var(--warn);
+      border-color: var(--warn);
     }
   `;
 
@@ -71,12 +75,20 @@ export class Notify extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     this.release = subscribe(EventsDocument, (data) => this.consider(data.events));
+    document.addEventListener('visibilitychange', this.onVisibility);
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.release?.();
+    document.removeEventListener('visibilitychange', this.onVisibility);
   }
+
+  private onVisibility = () => {
+    if (document.hidden) return;
+    this.missed = 0;
+    document.title = BASE_TITLE;
+  };
 
   /** What is worth interrupting someone for. Everything else stays in the feed. */
   private notable(event: FeedEvent): string | null {
@@ -93,7 +105,13 @@ export class Notify extends LitElement {
     if (Date.now() - new Date(event.ts).getTime() > FRESH_SECONDS * 1000) return;
 
     const title = this.notable(event);
-    if (!title || Notification.permission !== 'granted') return;
+    if (!title) return;
+
+    // The title badge works everywhere and needs no permission, so it happens regardless. Safari
+    // in particular will not grant notifications on a plain http origin, and a feature that only
+    // works in some browsers is worse than one that always does something.
+    this.missed += 1;
+    document.title = `(${this.missed}) ${BASE_TITLE}`;
 
     const now = Date.now();
     if (now - this.lastAt < QUIET_MS) {
@@ -105,14 +123,16 @@ export class Notify extends LitElement {
     const extra = this.suppressed > 0 ? ` (+${this.suppressed} more)` : '';
     this.suppressed = 0;
 
-    const notification = new Notification(`${title}${extra}`, {
-      body: event.summary ?? '',
-      tag: 'workspace-watcher',
-    });
-    notification.onclick = () => {
-      window.focus();
-      notification.close();
-    };
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      const notification = new Notification(`${title}${extra}`, {
+        body: event.summary ?? '',
+        tag: 'workspace-watcher',
+      });
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+      };
+    }
 
     if (this.mode === 'sound') this.beep();
   }
@@ -137,17 +157,15 @@ export class Notify extends LitElement {
 
   private async cycle() {
     const next = MODES[(MODES.indexOf(this.mode) + 1) % MODES.length];
-    if (next !== 'off' && Notification.permission !== 'granted') {
-      // Permission has to be asked from a click; doing it on load is what gets a site blocked.
-      const result = await Notification.requestPermission();
-      if (result !== 'granted') {
-        this.denied = true;
-        this.mode = 'off';
-        localStorage.setItem(STORAGE_KEY, 'off');
-        return;
+    if (next !== 'off' && typeof Notification !== 'undefined') {
+      if (Notification.permission === 'default') {
+        // Permission has to be asked from a click; asking on load is what gets a site blocked.
+        await Notification.requestPermission().catch(() => 'denied');
       }
+      // Refused is not a failure any more. Safari will not grant notifications on a plain http
+      // origin, so the mode stays on and the title badge carries it instead.
+      this.denied = Notification.permission !== 'granted';
     }
-    this.denied = false;
     this.mode = next;
     localStorage.setItem(STORAGE_KEY, next);
   }
@@ -156,10 +174,16 @@ export class Notify extends LitElement {
     return html`
       <button
         class=${this.denied ? 'denied' : this.mode !== 'off' ? 'on' : ''}
-        title="Announce failures, blocks and finished agents - but only while this tab is in the background"
+        title=${this.denied
+          ? 'Your browser refused notifications, so the tab title carries the count instead. Safari will not grant them on a plain http origin.'
+          : 'Announce failures, blocks and finished agents - but only while this tab is in the background'}
         @click=${() => this.cycle()}
       >
-        ${this.denied ? '🔕 blocked by browser' : LABELS[this.mode]}
+        ${this.mode === 'off'
+          ? LABELS.off
+          : this.denied
+            ? `📛 title only${this.mode === 'sound' ? ' + sound' : ''}`
+            : LABELS[this.mode]}
       </button>
     `;
   }

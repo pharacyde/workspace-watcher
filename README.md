@@ -243,6 +243,24 @@ asking the superproject for it fails with *exists on disk, but not in HEAD*, whi
 rendered the file as entirely new. The diff resolves each file against whichever repository
 actually tracks it, and a submodule entry is labelled as such rather than as a modified file.
 
+### Staying current
+
+A tab left open keeps running the bundle it started with. The header shows **↻ new build** when the
+frontend has been rebuilt underneath it, and reloads itself if the tab is in the background — a page
+someone is reading should not lose its scroll position and filters without being asked.
+
+`index.html` is served `no-store` while the content-hashed assets keep a year, so an ordinary
+refresh is always enough; a hard refresh should never be needed.
+
+### Notifications
+
+Failures, guard blocks and finished agents are announced while the tab is in the background, and
+only then: a notification for something you are already watching happen is noise.
+
+If the browser refuses permission — **Safari will not grant it on a plain `http` origin** — the tab
+title carries the count instead (`(3) workspace-watcher`), which needs no permission and works
+everywhere. The button says which of the two you are getting.
+
 ## Guard (optional)
 
 Rules about what an agent may touch. This is the one place the project stops being a passive

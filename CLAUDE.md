@@ -80,6 +80,11 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
 - **Events are batched onto one animation frame.** A build produces thousands of events per second;
   updating per event spends the whole frame budget on layout. The feed is virtualised for the same
   reason. The transport is never the bottleneck here - the DOM is.
+- **Notifications must degrade, not fail.** Safari refuses them on a plain http origin, so the
+  title badge runs regardless and the button says which you are getting. A feature that works in
+  some browsers is worse than one that always does something.
+- **Timeline refreshes are generation-guarded.** Toggling twice quickly starts two refreshes, and
+  the slower one finishing last overwrote the other's series with an empty one.
 - **Following the tail listens for wheel/touch/key, never for `scroll`.** A scroll event cannot say
   whose scroll it was: assigning `scrollTop` fires one, and measuring a layout the virtualizer was
   still growing made an earlier version decide "not at the bottom" and switch following off

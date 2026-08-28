@@ -30,10 +30,13 @@ import com.netflix.graphql.dgs.InputArgument;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import org.reactivestreams.Publisher;
+import org.springframework.core.io.ClassPathResource;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -91,6 +94,23 @@ public class WatchDataFetcher {
     this.objectMapper = objectMapper;
   }
 
+  /**
+   * Identifies the build the browser is running.
+   *
+   * <p>Derived from the built index.html, whose asset names carry a content hash, so it changes
+   * exactly when the frontend changes and not merely when the process restarts.
+   */
+  private static String buildId() {
+    try (var in = new ClassPathResource("static/index.html").getInputStream()) {
+      byte[] digest = MessageDigest.getInstance("SHA-256").digest(in.readAllBytes());
+      return HexFormat.of().formatHex(digest, 0, 8);
+    } catch (Exception e) {
+      return "unknown";
+    }
+  }
+
+  private final String buildId = buildId();
+
   @DgsQuery
   public Status status() {
     Path workspace = active.get();
@@ -98,6 +118,7 @@ public class WatchDataFetcher {
         .workspace(workspace == null ? null : workspace.toString())
         .workspaceExists(workspace != null && Files.isDirectory(workspace))
         .os(System.getProperty("os.name"))
+        .buildId(buildId)
         .transcriptDirs(transcripts.watchedTranscripts())
         .git(mapper.toGitSnapshot(git.current()))
         .processes(mapper.toProcessSnapshot(processes.currentSnapshot()))

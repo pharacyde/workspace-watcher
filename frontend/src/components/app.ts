@@ -11,6 +11,7 @@ import './diff-panel';
 import './feed';
 import './git-panel';
 import './process-panel';
+import './reload';
 import './timeline';
 import './notify';
 import './usage';
@@ -215,6 +216,7 @@ export class App extends LitElement {
           title="Filters the activity feed, the working tree and the process list at once"
           @input=${(e: Event) => (this.search = (e.target as HTMLInputElement).value)}
         />
+        <ww-reload></ww-reload>
         <ww-notify></ww-notify>
         <ww-usage></ww-usage>
         ${this.hasTranscripts

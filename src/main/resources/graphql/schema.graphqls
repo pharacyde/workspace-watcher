@@ -252,6 +252,14 @@ type Status {
   workspace: String
   workspaceExists: Boolean!
   os: String!
+
+  """
+  Identifies the build the browser is running, so a page can notice it has gone stale.
+
+  Derived from the built index.html, whose asset names carry a content hash, so it changes when the
+  frontend changes rather than merely when the process restarts.
+  """
+  buildId: String!
   "Transcript directories being tailed. Empty means nothing will be attributed to an agent."
   transcriptDirs: [String!]!
   git: GitSnapshot!
