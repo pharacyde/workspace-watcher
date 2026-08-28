@@ -1,5 +1,6 @@
 package be.kleisli.ww.proc;
 
+import be.kleisli.ww.core.ActiveWorkspace;
 import be.kleisli.ww.core.Shell;
 import be.kleisli.ww.core.StateStream;
 import be.kleisli.ww.core.WatcherProperties;
@@ -34,11 +35,13 @@ public class ProcessTreeService {
   public record Snapshot(String at, int total, List<Node> roots) {}
 
   private final WatcherProperties props;
+  private final ActiveWorkspace active;
   private final StateStream<Snapshot> stream = new StateStream<>();
   private volatile List<Node> lastTree = List.of();
 
-  public ProcessTreeService(WatcherProperties props) {
+  public ProcessTreeService(WatcherProperties props, ActiveWorkspace active) {
     this.props = props;
+    this.active = active;
     stream.publish(new Snapshot(Instant.now().toString(), 0, List.of()));
   }
 
@@ -52,10 +55,11 @@ public class ProcessTreeService {
 
   @Scheduled(fixedDelayString = "${watcher.process-poll-ms:2000}")
   public void poll() {
-    if (props.getProcessPollMs() <= 0) {
+    Path workspace = active.get();
+    if (props.getProcessPollMs() <= 0 || workspace == null) {
       return;
     }
-    Map<Long, String> inWorkspace = processesWithCwdIn(props.workspacePath());
+    Map<Long, String> inWorkspace = processesWithCwdIn(workspace);
     List<Node> tree = buildTree(inWorkspace);
     if (tree.equals(lastTree)) {
       return;

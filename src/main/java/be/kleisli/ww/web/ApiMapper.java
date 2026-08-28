@@ -1,11 +1,13 @@
 package be.kleisli.ww.web;
 
+import be.kleisli.ww.claude.WorkspaceRegistry;
 import be.kleisli.ww.generated.types.FileStatus;
 import be.kleisli.ww.generated.types.FileVersions;
 import be.kleisli.ww.generated.types.GitSnapshot;
 import be.kleisli.ww.generated.types.ProcessNode;
 import be.kleisli.ww.generated.types.ProcessSnapshot;
 import be.kleisli.ww.generated.types.Source;
+import be.kleisli.ww.generated.types.WorkspaceEntry;
 import be.kleisli.ww.git.GitService;
 import be.kleisli.ww.proc.ProcessTreeService;
 import java.util.List;
@@ -64,6 +66,19 @@ public class ApiMapper {
                     .command(node.command())
                     .cwd(node.cwd())
                     .children(toNodes(node.children()))
+                    .build())
+        .toList();
+  }
+
+  public List<WorkspaceEntry> toWorkspaces(List<WorkspaceRegistry.Entry> entries) {
+    return entries.stream()
+        .map(
+            entry ->
+                WorkspaceEntry.newBuilder()
+                    .path(entry.path())
+                    .lastActivity(entry.lastActivity())
+                    .pendingEvents(entry.pendingEvents())
+                    .exists(entry.exists())
                     .build())
         .toList();
   }

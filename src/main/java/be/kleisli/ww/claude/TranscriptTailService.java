@@ -1,5 +1,6 @@
 package be.kleisli.ww.claude;
 
+import be.kleisli.ww.core.ActiveWorkspace;
 import be.kleisli.ww.core.EventBus;
 import be.kleisli.ww.core.Text;
 import be.kleisli.ww.core.WatchEvent;
@@ -40,6 +41,7 @@ public class TranscriptTailService {
   private static final int SUMMARY_LIMIT = 240;
 
   private final WatcherProperties props;
+  private final ActiveWorkspace active;
   private final EventBus bus;
   private final ObjectMapper mapper;
 
@@ -55,8 +57,10 @@ public class TranscriptTailService {
         }
       };
 
-  public TranscriptTailService(WatcherProperties props, EventBus bus, ObjectMapper mapper) {
+  public TranscriptTailService(
+      WatcherProperties props, ActiveWorkspace active, EventBus bus, ObjectMapper mapper) {
     this.props = props;
+    this.active = active;
     this.bus = bus;
     this.mapper = mapper;
   }
@@ -74,7 +78,11 @@ public class TranscriptTailService {
     if (!Files.isDirectory(projects)) {
       return List.of();
     }
-    String prefix = escapeCwd(props.workspacePath());
+    Path workspace = active.get();
+    if (workspace == null) {
+      return List.of();
+    }
+    String prefix = escapeCwd(workspace);
     try (Stream<Path> dirs = Files.list(projects)) {
       // The exact directory, plus any session that was started in a subdirectory of it.
       return dirs.filter(Files::isDirectory)
@@ -228,9 +236,11 @@ public class TranscriptTailService {
     if (raw.isBlank()) {
       return null;
     }
-    Path workspace = props.workspacePath();
+    Path workspace = active.get();
     Path path = Path.of(raw).toAbsolutePath().normalize();
-    return path.startsWith(workspace) ? workspace.relativize(path).toString() : raw;
+    return workspace != null && path.startsWith(workspace)
+        ? workspace.relativize(path).toString()
+        : raw;
   }
 
   /** Exposed for the status endpoint so the UI can say whether layer 1 is actually live. */

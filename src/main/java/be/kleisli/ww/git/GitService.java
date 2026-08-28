@@ -1,5 +1,6 @@
 package be.kleisli.ww.git;
 
+import be.kleisli.ww.core.ActiveWorkspace;
 import be.kleisli.ww.core.Shell;
 import be.kleisli.ww.core.StateStream;
 import be.kleisli.ww.core.WatcherProperties;
@@ -32,6 +33,7 @@ public class GitService {
 
   private static final Snapshot NOT_A_REPO = new Snapshot(false, null, null, null, List.of());
 
+  private final ActiveWorkspace active;
   private final WatcherProperties props;
   private final StateStream<Snapshot> stream = new StateStream<>();
 
@@ -43,9 +45,9 @@ public class GitService {
    */
   private volatile Path root;
 
-  public GitService(WatcherProperties props) {
+  public GitService(ActiveWorkspace active, WatcherProperties props) {
+    this.active = active;
     this.props = props;
-    this.root = props.workspacePath();
     stream.publish(NOT_A_REPO);
   }
 
@@ -75,16 +77,21 @@ public class GitService {
    * exist.
    */
   public Path resolveInRepo(String relativePath) {
-    Path resolved = root.resolve(relativePath).normalize();
-    if (!resolved.startsWith(root)) {
+    Path repoRoot = root;
+    if (repoRoot == null) {
+      throw new IllegalStateException("no workspace is being watched");
+    }
+    Path resolved = repoRoot.resolve(relativePath).normalize();
+    if (!resolved.startsWith(repoRoot)) {
       throw new IllegalArgumentException("path outside repository");
     }
     return resolved;
   }
 
   private Snapshot read() {
-    Path ws = props.workspacePath();
-    if (!Files.isDirectory(ws)) {
+    Path ws = active.get();
+    if (ws == null || !Files.isDirectory(ws)) {
+      root = null;
       return NOT_A_REPO;
     }
     Shell.Result toplevel = Shell.run(ws, List.of("git", "rev-parse", "--show-toplevel"), 5);

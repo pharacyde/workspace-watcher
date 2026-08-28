@@ -1,6 +1,12 @@
 import { css, html, LitElement } from 'lit';
 import { onConnectionState, request, type ConnectionState } from '../api/client';
-import { StatusDocument } from '../api/documents';
+import {
+  ActiveWorkspaceDocument,
+  StatusDocument,
+  WatchWorkspaceDocument,
+  WorkspacesDocument,
+} from '../api/documents';
+import { LatestController } from '../api/subscriptions';
 import './diff-panel';
 import './feed';
 import './git-panel';
@@ -20,6 +26,8 @@ export class App extends LitElement {
   declare private connection: ConnectionState;
 
   private releaseConnection?: () => void;
+  private readonly workspaces = new LatestController(this, WorkspacesDocument);
+  private readonly active = new LatestController(this, ActiveWorkspaceDocument);
 
   static styles = css`
     :host {
@@ -63,6 +71,19 @@ export class App extends LitElement {
       color: var(--del);
       border-color: var(--del);
     }
+    select {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      font: inherit;
+      font-size: 12px;
+      padding: 1px 4px;
+      max-width: 46ch;
+    }
+    .pending {
+      color: var(--warn);
+    }
     main {
       flex: 1;
       min-height: 0;
@@ -90,7 +111,9 @@ export class App extends LitElement {
     this.releaseConnection = onConnectionState((state) => (this.connection = state));
     request(StatusDocument)
       .then(({ status }) => {
-        this.workspace = status.workspace;
+        // Null until a hook reveals a project: the watcher no longer needs to be told what to
+        // look at, it waits to be shown.
+        this.workspace = status.workspace ?? 'waiting for an agent to show a workspace…';
         this.hasTranscripts = status.transcriptDirs.length > 0;
       })
       .catch(() => (this.workspace = 'backend unreachable'));
@@ -101,11 +124,40 @@ export class App extends LitElement {
     this.releaseConnection?.();
   }
 
+  /**
+   * Workspaces register themselves: the hook writes a spool directory the first time it fires in a
+   * project, so this list fills up as you work rather than being configured anywhere.
+   */
+  private workspacePicker() {
+    const entries = this.workspaces.value?.workspaces ?? [];
+    const current = this.active.value?.activeWorkspace ?? this.workspace;
+    if (entries.length < 2) {
+      return html`<span class="path">${current}</span>`;
+    }
+    return html`
+      <select
+        title="Workspaces that have registered themselves through an agent hook"
+        @change=${(event: Event) =>
+          request(WatchWorkspaceDocument, { path: (event.target as HTMLSelectElement).value })}
+      >
+        ${entries.map(
+          (entry) => html`
+            <option value=${entry.path} ?selected=${entry.path === current}>
+              ${entry.path}${entry.exists ? '' : ' (gone)'}${entry.pendingEvents
+                ? ` · ${entry.pendingEvents} pending`
+                : ''}
+            </option>
+          `,
+        )}
+      </select>
+    `;
+  }
+
   render() {
     return html`
       <header>
         <h1>workspace-watcher</h1>
-        <span class="path">${this.workspace}</span>
+        ${this.workspacePicker()}
         <span class="pill ${this.connection}">${this.connection}</span>
         ${this.hasTranscripts
           ? ''

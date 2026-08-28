@@ -57,14 +57,19 @@ automatically by the Maven build if you build from source.
 
 ```bash
 mvn -DskipTests package
-java -jar target/workspace-watcher-0.1.0-SNAPSHOT.jar --watcher.workspace=/path/to/your/project
+java -jar target/workspace-watcher-0.1.0-SNAPSHOT.jar
 ```
+
+No workspace argument. Install the hook once (below), then work as you normally would: the first
+tool call an agent makes in a project registers it, and the watcher starts following the project
+you are actually in. Switch between registered projects from the dropdown in the header, or pin one
+with `--watcher.workspace=/path/to/project`.
 
 `mvn package` builds both halves: Maven downloads a pinned node, runs the frontend build, and packs
 the result into the jar. Use `-DskipFrontend` to build the backend alone.
 
-Open <http://127.0.0.1:8080>. Then, in your own terminal, `cd` to that project and start Claude Code
-as you normally would. The schema explorer sits at <http://127.0.0.1:8080/graphiql>.
+Open <http://127.0.0.1:8080>. Then, in your own terminal, `cd` to a project and start Claude Code as
+you normally would. The schema explorer sits at <http://127.0.0.1:8080/graphiql>.
 
 If your default `java` is older than 25:
 
@@ -102,8 +107,12 @@ typing it would either lie or drag in a scalar library for a field the UI treats
 Transcript tailing already captures everything within about half a second. If you want events the
 moment they happen, install the hook:
 
+Install it globally in `~/.claude/settings.json` to observe every project you work in, or per
+project in `.claude/settings.json`. Global is safe: the spool is a directory per project and prunes
+itself, so one project's events can never reach another project's watcher.
+
 ```jsonc
-// .claude/settings.json in your project
+// ~/.claude/settings.json for every project, or .claude/settings.json for one
 {
   "hooks": {
     "PostToolUse": [
@@ -156,7 +165,7 @@ Any property can be passed as `--watcher.foo=bar` or set in `application.yml`.
 
 | Property | Default | |
 |---|---|---|
-| `watcher.workspace` | current directory | folder to observe |
+| `watcher.workspace` | *(empty — discover it)* | pin to one folder instead of following hooks |
 | `watcher.claude-home` | `~/.claude` | where transcripts live |
 | `watcher.fs-poll-ms` | `750` | workspace rescan interval |
 | `watcher.transcript-poll-ms` | `500` | transcript tail interval |

@@ -9,8 +9,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "watcher")
 public class WatcherProperties {
 
-  /** Workspace to observe. Defaults to the directory the app was started from. */
-  private String workspace = System.getProperty("user.dir");
+  /**
+   * Workspace to observe.
+   *
+   * <p>Empty by default, which means "discover it". The watcher then waits for an agent hook to
+   * tell it which project is actually being worked in, and adopts the most recently active one. Set
+   * this to pin it to a single workspace instead.
+   */
+  private String workspace = "";
 
   /** Root of the Claude Code transcript store. */
   private String claudeHome = System.getProperty("user.home") + "/.claude";
@@ -50,6 +56,9 @@ public class WatcherProperties {
    */
   private String spool = System.getProperty("user.home") + "/.claude/workspace-watcher-spool";
 
+  /** How often the register of known workspaces is rescanned. */
+  private long registryPollMs = 2000;
+
   /** How often the spool directory is drained. Cheap: the directory is normally empty. */
   private long spoolPollMs = 200;
 
@@ -59,11 +68,17 @@ public class WatcherProperties {
   /** Number of events kept for replay when a browser connects. */
   private int historySize = 2000;
 
-  public Path workspacePath() {
-    return Paths.get(workspace).toAbsolutePath().normalize();
-  }
+  /**
+   * Most individual file events one scan may report before it is collapsed into a summary.
+   *
+   * <p>A checkout, a branch switch or a build writing into a directory that is not ignored can
+   * change thousands of files at once. Listing them one by one buries everything the agent did and
+   * evicts real history from the replay buffer, for no information a reader can use.
+   */
+  private int maxFileEventsPerScan = 200;
 
-  public Path spoolPath() {
+  /** Root of the spool. Each workspace gets a subdirectory named after its escaped path. */
+  public Path spoolBasePath() {
     return Paths.get(spool).toAbsolutePath().normalize();
   }
 
@@ -127,6 +142,14 @@ public class WatcherProperties {
     this.spool = spool;
   }
 
+  public long getRegistryPollMs() {
+    return registryPollMs;
+  }
+
+  public void setRegistryPollMs(long registryPollMs) {
+    this.registryPollMs = registryPollMs;
+  }
+
   public long getSpoolPollMs() {
     return spoolPollMs;
   }
@@ -141,6 +164,14 @@ public class WatcherProperties {
 
   public void setProcessPollMs(long processPollMs) {
     this.processPollMs = processPollMs;
+  }
+
+  public int getMaxFileEventsPerScan() {
+    return maxFileEventsPerScan;
+  }
+
+  public void setMaxFileEventsPerScan(int maxFileEventsPerScan) {
+    this.maxFileEventsPerScan = maxFileEventsPerScan;
   }
 
   public int getHistorySize() {

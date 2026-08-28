@@ -15,6 +15,29 @@ export const StatusDocument = graphql(`
   }
 `);
 
+export const WorkspacesDocument = graphql(`
+  subscription Workspaces {
+    workspaces {
+      path
+      lastActivity
+      pendingEvents
+      exists
+    }
+  }
+`);
+
+export const ActiveWorkspaceDocument = graphql(`
+  subscription ActiveWorkspace {
+    activeWorkspace
+  }
+`);
+
+export const WatchWorkspaceDocument = graphql(`
+  mutation WatchWorkspace($path: String!) {
+    watchWorkspace(path: $path)
+  }
+`);
+
 export const EventsDocument = graphql(`
   subscription Events {
     events {

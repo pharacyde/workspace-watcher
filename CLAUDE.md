@@ -114,6 +114,12 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
   while Spring Boot 4.1.1 manages 2.10.0. Without the override the context fails to start.
 - **Do not mix DGS and Spring for GraphQL annotations.** Netflix's own guidance is explicit that
   some features do not work across both models. Everything here is DGS.
+- **The scanner sets its own pace.** Workspaces are discovered, so landing on a huge tree is a
+  normal accident rather than user error. The interval is derived from the measured walk duration
+  at a tenth duty cycle; a fixed interval cost 30-85% of a core on a 66,000-file tree.
+- **The spool is a directory per project**, named with the same escaping Claude Code uses for
+  transcripts, with a `.workspace` marker holding the real path because the escaping is not
+  reversible. That marker is the whole registration mechanism.
 - **`lsof +D` is a trap.** It walks the entire tree on every call. `lsof -a -d cwd -F pn` returns all
   processes' working directories in one cheap call; filter in Java.
 - **The subscription must not have a gap.** `EventBus.stream()` snapshots history and registers the

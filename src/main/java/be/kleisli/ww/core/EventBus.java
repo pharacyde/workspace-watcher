@@ -7,7 +7,10 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.BufferOverflowStrategy;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 
@@ -17,6 +20,16 @@ import reactor.core.publisher.FluxSink;
  */
 @Service
 public class EventBus {
+
+  private static final Logger log = LoggerFactory.getLogger(EventBus.class);
+
+  /**
+   * Per-subscriber buffer for a browser that cannot keep up.
+   *
+   * <p>Large enough that an ordinary burst is absorbed, small enough that a tab left paused during
+   * a long build cannot grow the heap without bound.
+   */
+  private static final int SUBSCRIBER_BUFFER = 4096;
 
   private final AtomicLong seq = new AtomicLong();
   private final Deque<WatchEvent> history = new ArrayDeque<>();
@@ -64,28 +77,40 @@ public class EventBus {
    * <p>The snapshot and the subscription are taken under the same lock {@link #publish} holds while
    * appending, so no event can slip through in between. An event may therefore be seen twice, which
    * the sequence filter removes — a duplicate is cheap, a gap is not.
+   *
+   * <p>The buffer is bounded and drops the <em>oldest</em> events under pressure. A subscriber that
+   * stops consuming — a paused browser tab, a laptop asleep mid-build — would otherwise queue every
+   * event produced until the heap gives out. Dropping the oldest keeps the feed showing what is
+   * happening now, which is what a live view is for, and the loss is logged rather than hidden.
+   *
+   * <p>{@code onBackpressureBuffer} requests without limit from upstream, so the unbounded queue
+   * inside {@code Flux.create} stays empty and this bound is the one that actually applies.
    */
   public Flux<WatchEvent> stream() {
-    return Flux.create(
-        sink -> {
-          List<WatchEvent> backlog;
-          Runnable unsubscribe;
-          synchronized (history) {
-            backlog = new ArrayList<>(history);
-            long lastReplayed = backlog.isEmpty() ? 0 : backlog.get(backlog.size() - 1).seq();
-            unsubscribe =
-                subscribe(
-                    event -> {
-                      if (event.seq() > lastReplayed) {
-                        sink.next(event);
-                      }
-                    });
-          }
-          backlog.forEach(sink::next);
-          sink.onCancel(unsubscribe::run);
-          sink.onDispose(unsubscribe::run);
-        },
-        FluxSink.OverflowStrategy.BUFFER);
+    return Flux.<WatchEvent>create(
+            sink -> {
+              List<WatchEvent> backlog;
+              Runnable unsubscribe;
+              synchronized (history) {
+                backlog = new ArrayList<>(history);
+                long lastReplayed = backlog.isEmpty() ? 0 : backlog.get(backlog.size() - 1).seq();
+                unsubscribe =
+                    subscribe(
+                        event -> {
+                          if (event.seq() > lastReplayed) {
+                            sink.next(event);
+                          }
+                        });
+              }
+              backlog.forEach(sink::next);
+              sink.onCancel(unsubscribe::run);
+              sink.onDispose(unsubscribe::run);
+            },
+            FluxSink.OverflowStrategy.BUFFER)
+        .onBackpressureBuffer(
+            SUBSCRIBER_BUFFER,
+            dropped -> log.warn("subscriber too slow; dropped event seq={}", dropped.seq()),
+            BufferOverflowStrategy.DROP_OLDEST);
   }
 
   public Runnable subscribe(Consumer<WatchEvent> subscriber) {

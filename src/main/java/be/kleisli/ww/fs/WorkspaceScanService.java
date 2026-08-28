@@ -1,5 +1,6 @@
 package be.kleisli.ww.fs;
 
+import be.kleisli.ww.core.ActiveWorkspace;
 import be.kleisli.ww.core.EventBus;
 import be.kleisli.ww.core.WatchEvent;
 import be.kleisli.ww.core.WatcherProperties;
@@ -10,8 +11,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -40,14 +43,34 @@ public class WorkspaceScanService {
   private record Stamp(long size, long modified) {}
 
   private final WatcherProperties props;
+  private final ActiveWorkspace active;
   private final EventBus bus;
   private final GitService git;
   private final Set<String> ignore;
 
-  private Map<Path, Stamp> previous;
+  /**
+   * Share of wall-clock time this scanner may spend walking the tree.
+   *
+   * <p>Fixed at a tenth. The interval is derived from how long a walk actually takes rather than
+   * assumed: measured here, a 66,000-file tree takes 0.54s to walk, so polling it every 750ms as
+   * configured meant scanning essentially without pause and cost 30-85% of a core. Workspaces are
+   * discovered now, not configured, so landing on a large tree is a normal accident rather than
+   * user error.
+   */
+  private static final long DUTY_CYCLE_DIVISOR = 10;
 
-  public WorkspaceScanService(WatcherProperties props, EventBus bus, GitService git) {
+  /** Effective interval above which the file layer is coarse enough to be worth mentioning. */
+  private static final long SLOW_SCAN_NOTICE_MS = 5_000;
+
+  private Map<Path, Stamp> previous;
+  private Path baselineFor;
+  private long nextScanAt;
+  private boolean noticedSlow;
+
+  public WorkspaceScanService(
+      WatcherProperties props, ActiveWorkspace active, EventBus bus, GitService git) {
     this.props = props;
+    this.active = active;
     this.bus = bus;
     this.git = git;
     this.ignore = new HashSet<>(props.getIgnoreDirs());
@@ -55,16 +78,47 @@ public class WorkspaceScanService {
 
   @Scheduled(fixedDelayString = "${watcher.fs-poll-ms:750}")
   public void scan() {
-    Path root = props.workspacePath();
-    if (!Files.isDirectory(root)) {
+    Path root = active.get();
+    if (root == null || !Files.isDirectory(root)) {
+      return;
+    }
+    if (!root.equals(baselineFor)) {
+      // Workspace changed underneath us; the old snapshot describes a different tree entirely.
+      previous = null;
+      baselineFor = root;
+      nextScanAt = 0;
+      noticedSlow = false;
+    }
+    if (System.currentTimeMillis() < nextScanAt) {
       return;
     }
     Map<Path, Stamp> current;
+    long startedAt = System.nanoTime();
     try {
       current = snapshot(root);
     } catch (IOException e) {
       log.debug("workspace scan failed: {}", e.toString());
       return;
+    }
+    long tookMs = (System.nanoTime() - startedAt) / 1_000_000;
+    long interval = Math.max(props.getFsPollMs(), tookMs * DUTY_CYCLE_DIVISOR);
+    nextScanAt = System.currentTimeMillis() + interval;
+
+    if (interval > SLOW_SCAN_NOTICE_MS && !noticedSlow) {
+      noticedSlow = true;
+      // Said out loud rather than hidden: on a tree this size the file layer reports changes in
+      // batches of seconds. Agent attribution is unaffected - that comes from transcripts and
+      // hooks, which are cheap and exact.
+      bus.publish(
+          WatchEvent.of(WatchEvent.Source.SYSTEM, "SLOW_SCAN")
+              .summary(
+                  current.size()
+                      + " files take "
+                      + tookMs
+                      + "ms to scan; file events will lag by up to "
+                      + interval / 1000
+                      + "s")
+              .path(root.toString()));
     }
 
     if (previous == null) {
@@ -79,28 +133,50 @@ public class WorkspaceScanService {
       return;
     }
 
-    boolean changed = false;
+    List<Path> created = new ArrayList<>();
+    List<Path> modified = new ArrayList<>();
+    List<Path> deleted = new ArrayList<>();
     for (Map.Entry<Path, Stamp> entry : current.entrySet()) {
       Stamp before = previous.get(entry.getKey());
       if (before == null) {
-        emit("CREATED", root, entry.getKey());
-        changed = true;
+        created.add(entry.getKey());
       } else if (!before.equals(entry.getValue())) {
-        emit("MODIFIED", root, entry.getKey());
-        changed = true;
+        modified.add(entry.getKey());
       }
     }
     for (Path gone : previous.keySet()) {
       if (!current.containsKey(gone)) {
-        emit("DELETED", root, gone);
-        changed = true;
+        deleted.add(gone);
       }
     }
 
     previous = current;
-    if (changed) {
-      git.refresh();
+    int total = created.size() + modified.size() + deleted.size();
+    if (total == 0) {
+      return;
     }
+
+    if (total > props.getMaxFileEventsPerScan()) {
+      // Collapsed rather than listed. Thousands of rows would evict the agent's own actions from
+      // the replay buffer, which is the one thing a reader actually came for.
+      bus.publish(
+          WatchEvent.of(WatchEvent.Source.FS, "BULK")
+              .summary(
+                  total
+                      + " files changed at once ("
+                      + created.size()
+                      + " created, "
+                      + modified.size()
+                      + " modified, "
+                      + deleted.size()
+                      + " deleted)")
+              .path(root.toString()));
+    } else {
+      created.forEach(file -> emit("CREATED", root, file));
+      modified.forEach(file -> emit("MODIFIED", root, file));
+      deleted.forEach(file -> emit("DELETED", root, file));
+    }
+    git.refresh();
   }
 
   private void emit(String type, Path root, Path file) {

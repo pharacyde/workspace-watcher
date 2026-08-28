@@ -1,7 +1,7 @@
 package be.kleisli.ww.claude;
 
+import be.kleisli.ww.core.ActiveWorkspace;
 import be.kleisli.ww.core.EventBus;
-import be.kleisli.ww.core.WatcherProperties;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -39,19 +39,28 @@ public class HookSpoolService {
   private static final Duration MAX_AGE = Duration.ofHours(1);
   private static final int MAX_PER_POLL = 500;
 
-  private final WatcherProperties props;
+  private final ActiveWorkspace active;
+  private final WorkspaceRegistry registry;
   private final EventBus bus;
   private final ObjectMapper mapper;
 
-  public HookSpoolService(WatcherProperties props, EventBus bus, ObjectMapper mapper) {
-    this.props = props;
+  public HookSpoolService(
+      ActiveWorkspace active, WorkspaceRegistry registry, EventBus bus, ObjectMapper mapper) {
+    this.active = active;
+    this.registry = registry;
     this.bus = bus;
     this.mapper = mapper;
   }
 
   @Scheduled(fixedDelayString = "${watcher.spool-poll-ms:200}")
   public void drain() {
-    Path spool = props.spoolPath();
+    // Only the watched workspace's own spool is drained. The hook writes into a directory per
+    // project, so a globally installed hook cannot leak one project's events into another's feed.
+    Path workspace = active.get();
+    if (workspace == null) {
+      return;
+    }
+    Path spool = registry.spoolFor(workspace);
     if (!Files.isDirectory(spool)) {
       return;
     }

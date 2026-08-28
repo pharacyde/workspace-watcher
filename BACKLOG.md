@@ -85,9 +85,13 @@ Warn when an agent touches files outside the project, or sensitive files like `.
 *Note: as a warning this arrives after the fact. For Claude Code the same rule can run as a
 `PreToolUse` hook, which can actually **block** the write. Same rule set, real enforcement.*
 
-**P4-03 Multi-workspace support** 🟢
+**P4-03 Multi-workspace support** ✅
 Switch between project folders from a dropdown.
-*Requires making the workspace a per-session runtime value instead of one startup property.*
+*Done, and better than proposed: workspaces are not configured at all. The hook writes a spool
+directory per project and leaves a marker with the real path, so a project registers itself the
+first time an agent does anything in it. The watcher starts with no argument, adopts the most
+recently active project, and the header dropdown switches between registered ones. Collectors read
+the active workspace on every poll, so a switch takes effect within one interval with no restart.*
 
 ## Epic 5 — UX, multi-device & remote access
 
@@ -147,11 +151,16 @@ opt-in as P4-01.*
 Events live in a 2000-entry ring buffer and die with the process. Persistence is the prerequisite
 for replay (P7-03), for cross-session history, and for surviving a restart.
 
-**P9-02 Backpressure and throttling** 🟢
+**P9-02 Backpressure and throttling** ✅
 A `npm install` produces tens of thousands of file events. The feed needs coalescing per path and a
-throughput cap before it meets a real build. `EventBus.stream()` currently uses an unbounded
-`BUFFER` overflow strategy, which is the wrong answer for a slow client — replace it with a bounded
-buffer plus `Flux.bufferTimeout` coalescing.
+throughput cap before it meets a real build.
+
+*Done in three places. `EventBus.stream()` uses a bounded per-subscriber buffer that drops the
+oldest events and logs the loss, so a paused tab cannot grow the heap. A scan that changes more
+than `maxFileEventsPerScan` files collapses into one summary event rather than thousands of rows.
+And the scanner now derives its own interval from how long a walk actually takes, holding itself to
+a tenth of wall-clock time — a 66,000-file tree was costing 30-85% of a core at the configured
+750ms.*
 
 Also worth revisiting on the client: once the UI grows past a plain feed, RxJS for stream operators
 and a virtualised list are the two libraries that actually earn their weight here.

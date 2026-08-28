@@ -77,8 +77,25 @@ type ProcessSnapshot {
   roots: [ProcessNode!]!
 }
 
+"""
+A workspace that has registered itself by an agent hook firing in it.
+
+Registration needs no configuration: the hook writes a spool directory named after the project the
+first time it runs there, so a project enrols itself the moment an agent does anything in it.
+"""
+type WorkspaceEntry {
+  path: String!
+  "ISO-8601 instant of the most recent hook activity."
+  lastActivity: String!
+  "Hook events waiting on disk for a watcher to pick them up."
+  pendingEvents: Int!
+  "False when the directory has since been deleted or moved."
+  exists: Boolean!
+}
+
 type Status {
-  workspace: String!
+  "Null until a workspace has been chosen or discovered."
+  workspace: String
   workspaceExists: Boolean!
   os: String!
   "Transcript directories being tailed. Empty means nothing will be attributed to an agent."
@@ -93,9 +110,20 @@ type Query {
   fileVersions(path: String!): FileVersions!
   "Most recent events from the in-memory buffer, oldest first."
   recentEvents(limit: Int = 200): [WatchEvent!]!
+
+  "Every workspace that has registered itself, most recently active first."
+  workspaces: [WorkspaceEntry!]!
 }
 
 type Mutation {
+  """
+  Points the watcher at a workspace. It takes effect within one polling interval; nothing restarts.
+
+  The path must be a directory. Anything already registered is a safe argument, but any directory
+  works - registration is a convenience, not a requirement.
+  """
+  watchWorkspace(path: String!): Boolean!
+
   """
   Records an agent hook payload. The payload is the agent's raw hook JSON, base64-encoded:
   that keeps the shell side free of quoting bugs and needs no jq or python on the host.
@@ -121,4 +149,10 @@ type Subscription {
 
   "Current process tree. Emits the present value on subscribe, then on every change."
   processTree: ProcessSnapshot!
+
+  "The register of known workspaces. Emits the present value on subscribe, then on every change."
+  workspaces: [WorkspaceEntry!]!
+
+  "The workspace being watched. Emits on subscribe and whenever it is switched."
+  activeWorkspace: String!
 }
