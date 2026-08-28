@@ -16,6 +16,17 @@ type WatchEvent {
   pid: ID
   "Which agent produced this, when known. Always null for FS events."
   agent: String
+
+  "MCP server this call went to, when it went to one. Taken from the mcp__server__tool name."
+  mcpServer: String
+
+  """
+  Kind of subagent this call launched, when it launched one.
+
+  Read from the launch rather than from isSidechain, which sounds like the right field and is never
+  set in practice.
+  """
+  subagent: String
   sessionId: String
   "Raw payload as a JSON string. Shape depends on source; treat as opaque."
   detail: String

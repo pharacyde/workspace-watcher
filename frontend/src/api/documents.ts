@@ -61,6 +61,8 @@ export const EventsDocument = graphql(`
       path
       agent
       sessionId
+      mcpServer
+      subagent
       detail
     }
   }
@@ -205,6 +207,8 @@ export const HistoryDocument = graphql(`
       path
       agent
       sessionId
+      mcpServer
+      subagent
       detail
     }
   }

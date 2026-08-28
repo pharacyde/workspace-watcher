@@ -94,6 +94,10 @@ of events, and nothing alike in what they cost. Each series draws two densities 
 read from the database rather than the buffer, so it reaches back past what the live stream still
 holds. A button returns you to live.
 
+Calls that leave the machine or hand work to someone else are marked as such: an MCP call carries
+its server (`mcp:jenkins`), a subagent launch carries its kind (`agent:Explore`). Until now a call
+to Jenkins read exactly like editing a file two lines above it.
+
 A search box in the header filters **every panel at once** — the activity feed, the working tree and
 the process list. In the process tree a match anywhere in a subtree keeps that subtree, so a hit is
 never orphaned from its parent.

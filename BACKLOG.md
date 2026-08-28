@@ -203,10 +203,15 @@ an Apple-granted entitlement and root. Worth a spike to size, not worth blocking
 `/proc/<pid>/cwd` replaces `lsof`, `inotify` replaces the poller. Needed for the remote-server use
 case that motivated the webapp in the first place.
 
-**P9-06 Subagent and MCP visibility** 🟡 partially done
-*Sessions are now a first-class filter: the register reads them from the transcript files, picks up
-the title Claude Code generates, and marks a session live while its transcript is still being
-written. Sidechains (subagents) and MCP servers are still not broken out as their own lanes.*
+**P9-06 Subagent and MCP visibility** ✅
+*Sessions are a first-class filter, and MCP calls and subagent launches now carry what they are: an
+event knows which MCP server it went to and which kind of subagent it started.
+
+One correction to the original plan, found by measuring rather than assuming. It said transcripts
+"distinguish sidechains", and they do not - `isSidechain` is never true across sixty transcripts on
+this machine. What is there, and abundantly, is the call itself: 302 Jenkins calls, 99 Jira, 143
+subagent launches. Reading the launch is honest and the data supports it; reading a field that is
+never set would have shipped an empty feature.*
 
 **P9-06b (was P9-06) Original item** 🟢
 Transcripts distinguish sidechains (subagents) and MCP tool calls. Showing a subagent as its own

@@ -24,6 +24,10 @@ public record WatchEvent(
     Long pid,
     String agent,
     String sessionId,
+    /** MCP server this call went to, when it did. Derived from the tool name. */
+    String mcpServer,
+    /** Kind of subagent this call launched, when it launched one. */
+    String subagent,
     Object detail) {
 
   public enum Source {
@@ -51,6 +55,8 @@ public record WatchEvent(
     private Long pid;
     private String agent;
     private String sessionId;
+    private String mcpServer;
+    private String subagent;
     private Object detail;
 
     private Builder(Source source, String type) {
@@ -83,6 +89,16 @@ public record WatchEvent(
       return this;
     }
 
+    public Builder mcpServer(String server) {
+      this.mcpServer = server;
+      return this;
+    }
+
+    public Builder subagent(String kind) {
+      this.subagent = kind;
+      return this;
+    }
+
     public Builder detail(Object d) {
       this.detail = d;
       return this;
@@ -95,7 +111,18 @@ public record WatchEvent(
 
     WatchEvent build(long seq) {
       return new WatchEvent(
-          seq, Instant.now(), source, type, summary, path, pid, agent, sessionId, detail);
+          seq,
+          Instant.now(),
+          source,
+          type,
+          summary,
+          path,
+          pid,
+          agent,
+          sessionId,
+          mcpServer,
+          subagent,
+          detail);
     }
   }
 }

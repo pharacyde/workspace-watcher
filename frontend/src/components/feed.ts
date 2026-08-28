@@ -112,6 +112,22 @@ export class Feed extends LitElement {
       .agent {
         color: var(--dim);
       }
+      /* A call out to another system, or a handover to another agent, should not read the same as
+         editing a file two lines above it. */
+      .chip {
+        border: 1px solid currentColor;
+        border-radius: 3px;
+        padding: 0 3px;
+        margin-right: 6px;
+        font-size: 11px;
+        opacity: 0.9;
+      }
+      .chip.mcp {
+        color: var(--hook);
+      }
+      .chip.sub {
+        color: var(--add);
+      }
       lit-virtualizer {
         height: 100%;
       }
@@ -390,7 +406,13 @@ export class Feed extends LitElement {
                     >
                     <span class="tag ${event.source}">${label(event.source, event.type)}</span>
                     <span class="msg ${this.wrap ? '' : 'ellipsis'}">
-                      ${event.agent ? html`<span class="agent">${event.agent} </span>` : ''}${event.summary}
+                      ${event.mcpServer
+                        ? html`<span class="chip mcp">mcp:${event.mcpServer}</span>`
+                        : ''}${event.subagent
+                        ? html`<span class="chip sub">agent:${event.subagent}</span>`
+                        : ''}${event.agent
+                        ? html`<span class="agent">${event.agent} </span>`
+                        : ''}${event.summary}
                     </span>
                         </div>
                       `}

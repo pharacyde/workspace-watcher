@@ -172,6 +172,11 @@ own `~/.claude`.
 - **The spool is a directory per project**, named with the same escaping Claude Code uses for
   transcripts, with a `.workspace` marker holding the real path because the escaping is not
   reversible. That marker is the whole registration mechanism.
+- **Do not reach for `isSidechain` to detect subagents.** It sounds like the field for it and is
+  never set - measured across sixty transcripts. The `Task`/`Agent` call carries `subagent_type`,
+  and that is what the UI shows.
+- **MCP tools are `mcp__server__tool`.** The server is a field of its own; the summary carries only
+  the tool, because the raw name is mostly punctuation.
 - **A session title cannot come from the tail alone.** The tail skips whatever a transcript already
   contained when the watcher started, and Claude Code writes the `ai-title` near the beginning of a
   session, so `SessionRegistry` searches each transcript once for it. Without that, every session

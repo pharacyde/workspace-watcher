@@ -266,6 +266,8 @@ public class ApiMapper {
         .pid(event.pid() == null ? null : Long.toString(event.pid()))
         .agent(event.agent())
         .sessionId(event.sessionId())
+        .mcpServer(event.mcpServer())
+        .subagent(event.subagent())
         .detail(detail)
         .build();
   }

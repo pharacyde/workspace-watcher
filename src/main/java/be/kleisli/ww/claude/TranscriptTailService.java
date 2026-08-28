@@ -169,6 +169,8 @@ public class TranscriptTailService {
             .session(session)
             .summary(label)
             .path(relativeFilePath(input))
+            .mcpServer(mcpServer(tool))
+            .subagent(subagent(tool, input))
             .detail(detail));
   }
 
@@ -199,11 +201,52 @@ public class TranscriptTailService {
               input.path("url").asString(input.path("query").asString(""));
           default -> "";
         };
+    // For an MCP call the raw mcp__server__tool is mostly punctuation, and the server is already
+    // carried as its own field - so the summary is just the tool.
+    if (tool.startsWith("mcp__")) {
+      return mcpTail(tool);
+    }
     if (value.isBlank()) {
       return tool;
     }
     String firstLine = value.lines().findFirst().orElse(value);
     return tool + "  " + Text.truncate(firstLine, SUMMARY_LIMIT);
+  }
+
+  /** The tool half of an mcp__server__tool name. */
+  private static String mcpTail(String tool) {
+    String[] parts = tool.split("__", 3);
+    return parts.length > 2 ? parts[2] : tool;
+  }
+
+  /**
+   * The MCP server a call went to, when it went to one.
+   *
+   * <p>Tool names are {@code mcp__<server>__<tool>}, so the server is there for the taking. Worth
+   * taking: across the transcripts on this machine MCP calls run into the hundreds, and until now a
+   * call to Jenkins looked exactly like a call to the filesystem.
+   */
+  private static String mcpServer(String tool) {
+    if (!tool.startsWith("mcp__")) {
+      return null;
+    }
+    String[] parts = tool.split("__", 3);
+    return parts.length > 1 && !parts[1].isBlank() ? parts[1] : null;
+  }
+
+  /**
+   * The kind of subagent a call launched, when it launched one.
+   *
+   * <p>Not taken from {@code isSidechain}, which sounds like the right field and is never set in
+   * these transcripts - measured across sixty of them. The launch itself is recorded, and that is
+   * what can honestly be shown.
+   */
+  private static String subagent(String tool, JsonNode input) {
+    if (!tool.equals("Task") && !tool.equals("Agent")) {
+      return null;
+    }
+    String kind = input.path("subagent_type").asString(null);
+    return kind == null || kind.isBlank() ? "agent" : kind;
   }
 
   /** File-touching tools get a workspace-relative path so the UI can link them to a diff. */
