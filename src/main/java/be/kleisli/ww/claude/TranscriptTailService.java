@@ -42,6 +42,15 @@ public class TranscriptTailService {
   private final EventBus bus;
   private final ObjectMapper mapper;
 
+  /** agentId -> kind of subagent, learned from that agent's own turns. */
+  private final Map<String, String> agentKinds =
+      new LinkedHashMap<>() {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+          return size() > 500;
+        }
+      };
+
   /** Byte offset consumed so far, per transcript file. */
   private final Map<Path, Long> offsets = new HashMap<>();
 
@@ -69,7 +78,7 @@ public class TranscriptTailService {
 
   @Scheduled(fixedDelayString = "${watcher.transcript-poll-ms:500}")
   public void poll() {
-    for (Path file : locator.transcripts()) {
+    for (Path file : locator.allTranscripts()) {
       tail(file);
     }
   }
@@ -130,6 +139,7 @@ public class TranscriptTailService {
       return;
     }
     String session = root.path("sessionId").asString(null);
+    Origin origin = new Origin(session, insideSubagent(root), root.path("agentId").asString(null));
 
     // Claude Code writes a generated title for the session into the transcript. Picking it up as
     // it goes past turns an opaque session id into something selectable in the UI.
@@ -144,8 +154,8 @@ public class TranscriptTailService {
     }
     for (JsonNode block : content) {
       switch (block.path("type").asString()) {
-        case "tool_use" -> emitToolUse(block, session);
-        case "tool_result" -> emitToolResult(block, session);
+        case "tool_use" -> emitToolUse(block, origin);
+        case "tool_result" -> emitToolResult(block, origin);
         default -> {
           /* thinking and text blocks are narration, not actions */
         }
@@ -153,7 +163,13 @@ public class TranscriptTailService {
     }
   }
 
-  private void emitToolUse(JsonNode block, String session) {
+  /**
+   * Where a record came from: always a session, and when it was written from inside a subagent also
+   * the kind of agent and the identity of that particular one.
+   */
+  private record Origin(String session, String subagent, String agentId) {}
+
+  private void emitToolUse(JsonNode block, Origin origin) {
     String tool = block.path("name").asString("tool");
     JsonNode input = block.path("input");
     String label = describe(tool, input);
@@ -162,19 +178,22 @@ public class TranscriptTailService {
     Map<String, Object> detail = new LinkedHashMap<>();
     detail.put("tool", tool);
     detail.put("input", Text.truncate(input.toString(), Text.DETAIL_LIMIT));
+    if (origin.agentId() != null) {
+      detail.put("agentId", origin.agentId());
+    }
 
     bus.publish(
         WatchEvent.of(WatchEvent.Source.TRANSCRIPT, "TOOL_USE")
             .agent("claude-code")
-            .session(session)
+            .session(origin.session())
             .summary(label)
             .path(relativeFilePath(input))
             .mcpServer(mcpServer(tool))
-            .subagent(subagent(tool, input))
+            .subagent(origin.subagent() != null ? origin.subagent() : subagent(tool, input))
             .detail(detail));
   }
 
-  private void emitToolResult(JsonNode block, String session) {
+  private void emitToolResult(JsonNode block, Origin origin) {
     String label = pendingCalls.remove(block.path("tool_use_id").asString(""));
     boolean error = block.path("is_error").asBoolean(false);
     JsonNode content = block.path("content");
@@ -183,8 +202,9 @@ public class TranscriptTailService {
     bus.publish(
         WatchEvent.of(WatchEvent.Source.TRANSCRIPT, error ? "TOOL_ERROR" : "TOOL_RESULT")
             .agent("claude-code")
-            .session(session)
+            .session(origin.session())
             .summary(label != null ? label : firstLine(body))
+            .subagent(origin.subagent())
             .detail("output", Text.truncate(body, Text.DETAIL_LIMIT)));
   }
 
@@ -235,11 +255,37 @@ public class TranscriptTailService {
   }
 
   /**
+   * The kind of agent a record was written by, when it was written from inside a subagent.
+   *
+   * <p>{@code isSidechain} marks the record as a subagent's own work and {@code attributionAgent}
+   * names the kind - {@code general-purpose}, {@code Explore}, {@code fork} and so on. Both are
+   * set, contrary to what an earlier reading of these transcripts concluded: that reading only ever
+   * looked at session transcripts, where a subagent's records do not appear at all.
+   */
+  private String insideSubagent(JsonNode root) {
+    if (!root.path("isSidechain").asBoolean(false)) {
+      return null;
+    }
+    String agentId = root.path("agentId").asString(null);
+    String kind = root.path("attributionAgent").asString(null);
+    if (kind != null && !kind.isBlank()) {
+      if (agentId != null) {
+        agentKinds.put(agentId, kind);
+      }
+      return kind;
+    }
+    // Only the agent's own turns name the kind; the tool results coming back to it carry just the
+    // id. Looking the kind up keeps a call and its result in one lane instead of splitting them.
+    String remembered = agentId == null ? null : agentKinds.get(agentId);
+    return remembered != null ? remembered : "agent";
+  }
+
+  /**
    * The kind of subagent a call launched, when it launched one.
    *
-   * <p>Not taken from {@code isSidechain}, which sounds like the right field and is never set in
-   * these transcripts - measured across sixty of them. The launch itself is recorded, and that is
-   * what can honestly be shown.
+   * <p>Complementary to {@link #insideSubagent}: this tags the {@code Task} call that starts an
+   * agent, that tags the work the agent then does. Both land in the same field, so filtering on a
+   * kind shows the delegation and its consequences together.
    */
   private static String subagent(String tool, JsonNode input) {
     if (!tool.equals("Task") && !tool.equals("Agent")) {

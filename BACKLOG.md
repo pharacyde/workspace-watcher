@@ -180,7 +180,7 @@ gebouwd is, en hij overleefde omdat hij zich niet aankondigt: de verhoudingen tu
 blijven kloppen, elk cijfer blijft plausibel, alleen de orde van grootte is fout. Gededupliceerd op
 `message.id`.*
 
-**P10-02 Subagent-transcripts worden niet gelezen** 🟢
+**P10-02 Subagent-transcripts worden niet gelezen** ✅
 *`TranscriptLocator` zoekt `~/.claude/projects/*/*.jsonl` en mist daarmee een hele directorylaag:
 subagents schrijven naar `<sessionId>/subagents/agent-<agentId>.jsonl`. Nagemeten op deze machine:
 1111 bestanden, samen 764 MB, grootste 24 MB — waarvan de huidige glob er nul vindt. Het gevolg is
@@ -191,6 +191,14 @@ de verkeerde bestanden. De koppeling is exact: `toolUseResult.agentId` van de `A
 bestand aan, en `agent-<agentId>.meta.json` draagt `toolUseId`, `agentType` en `spawnDepth`. Een
 subagent-record draagt de `sessionId` van de ouder, dus het sessiefilter werkt meteen — een subagent
 hoort als eigen laan onder zijn sessie, niet als losse sessie.*
+
+*Gedaan. `TranscriptLocator.subagentTranscripts()` zoekt een laag dieper en de tail volgt sessies én
+subagents. Twee dingen bleken bij het meten anders dan hierboven aangenomen: de `.meta.json` is niet
+nodig, want `attributionAgent` staat op de regel zelf; en die staat alleen op de `assistant`-regels,
+terwijl `agentId` overal staat — dus de soort wordt per `agentId` onthouden, anders viel een call in
+een andere laan dan zijn eigen resultaat. Subagent-transcripts worden nooit opgeruimd (1111 op deze
+machine), dus alleen bestanden die in de laatste twee uur geschreven zijn worden gevolgd: een agent
+die al uren stil ligt, is klaar. Geverifieerd tegen een echt transcript van 24 MB.*
 
 **P10-01 Resterend limietverbruik uit `~/.claude.json`** 🟢
 *De header zegt wat er is uitgegeven en zwijgt over wat er nog over is, omdat CLAUDE.md vaststelt dat

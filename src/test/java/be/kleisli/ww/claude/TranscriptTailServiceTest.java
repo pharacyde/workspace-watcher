@@ -22,7 +22,10 @@ class TranscriptTailServiceTest {
   @TempDir Path tmp;
 
   private Path workspace;
+  private Path projects;
   private Path transcript;
+  private WatcherProperties props;
+  private ActiveWorkspace active;
   private EventBus bus;
   private TranscriptTailService service;
 
@@ -30,17 +33,17 @@ class TranscriptTailServiceTest {
   void setUp() throws IOException {
     workspace = Files.createDirectory(tmp.resolve("project"));
     Path claudeHome = Files.createDirectory(tmp.resolve("claude"));
-    Path projects =
+    projects =
         Files.createDirectories(
             claudeHome.resolve("projects").resolve(TranscriptLocator.escapeCwd(workspace)));
     transcript = projects.resolve("session.jsonl");
     Files.writeString(transcript, "");
 
-    WatcherProperties props = new WatcherProperties();
+    props = new WatcherProperties();
     props.setClaudeHome(claudeHome.toString());
     props.setWorkspace(workspace.toString());
     bus = new EventBus(props);
-    ActiveWorkspace active = new ActiveWorkspace(props);
+    active = new ActiveWorkspace(props);
     TranscriptLocator locator = new TranscriptLocator(props, active);
     service =
         new TranscriptTailService(
@@ -189,6 +192,96 @@ class TranscriptTailServiceTest {
     {"type":"assistant","sessionId":"s1","message":{"content":[\
     {"type":"tool_use","id":"t1","name":"%s","input":%s}]}}\
     """
+        .formatted(tool, input);
+  }
+
+  /**
+   * A subagent transcript, one directory level below the session it belongs to. Claude Code writes
+   * these to {@code <session-id>/subagents/agent-<id>.jsonl}.
+   */
+  private Path subagentTranscript(String session, String agentId) throws IOException {
+    Path dir = Files.createDirectories(projects.resolve(session).resolve("subagents"));
+    Path file = dir.resolve("agent-" + agentId + ".jsonl");
+    Files.writeString(file, "");
+    return file;
+  }
+
+  private static void appendTo(Path file, String line) throws IOException {
+    Files.writeString(
+        file, line + "\n", StandardCharsets.UTF_8, java.nio.file.StandardOpenOption.APPEND);
+  }
+
+  @Test
+  @DisplayName("follows the work a subagent does in its own transcript")
+  void readsSubagentTranscripts() throws IOException {
+    Path agent = subagentTranscript("session", "abc123");
+    assertThat(poll()).isEmpty();
+
+    appendTo(agent, sidechainToolUse("Bash", "{\"command\":\"echo from a subagent\"}"));
+
+    assertThat(poll())
+        .singleElement()
+        .satisfies(
+            e -> {
+              assertThat(e.summary()).contains("echo from a subagent");
+              // The parent's session, so the subagent appears under it rather than beside it.
+              assertThat(e.sessionId()).isEqualTo("s1");
+              assertThat(e.subagent()).isEqualTo("Explore");
+            });
+  }
+
+  @Test
+  @DisplayName("tags a subagent's results as well as its calls, so the pair stays together")
+  void tagsSubagentResults() throws IOException {
+    Path agent = subagentTranscript("session", "abc123");
+    poll();
+    appendTo(agent, sidechainToolUse("Bash", "{}"));
+    poll();
+
+    appendTo(
+        agent,
+"""
+{"type":"user","sessionId":"s1","isSidechain":true,"attributionAgent":"Explore",\
+"agentId":"abc123","message":{"content":[\
+{"type":"tool_result","tool_use_id":"t9","content":"done"}]}}\
+""");
+
+    // Named by the call that came before it: a tool result carries the agent id but not the kind.
+    assertThat(poll())
+        .last()
+        .satisfies(
+            e -> {
+              assertThat(e.type()).isEqualTo("TOOL_RESULT");
+              assertThat(e.subagent()).isEqualTo("Explore");
+            });
+  }
+
+  @Test
+  @DisplayName("does not mistake a main-session record for subagent work")
+  void mainSessionIsNotTaggedAsSubagent() throws IOException {
+    poll();
+    append(toolUse("Read", "{\"file_path\":\"/x/y.txt\"}"));
+
+    assertThat(poll()).singleElement().satisfies(e -> assertThat(e.subagent()).isNull());
+  }
+
+  @Test
+  @DisplayName("a subagent transcript is not a session of its own")
+  void subagentIsNotASession() throws IOException {
+    subagentTranscript("session", "abc123");
+
+    TranscriptLocator locator = new TranscriptLocator(props, active);
+    assertThat(locator.transcripts()).containsExactly(transcript);
+    assertThat(locator.allTranscripts()).hasSize(2);
+  }
+
+  private static String sidechainToolUse(String tool, String input) {
+    return
+"""
+{"type":"assistant","sessionId":"s1","isSidechain":true,"attributionAgent":"Explore",\
+"agentId":"abc123","message":{"content":[\
+{"type":"tool_use","id":"t1","name":"%s","input":%s}]}}\
+"""
         .formatted(tool, input);
   }
 }
