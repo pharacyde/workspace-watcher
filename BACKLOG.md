@@ -399,6 +399,42 @@ Tellen en groeperen kan wel, en is waarschijnlijk genoeg.*
 
 ---
 
+## Epic 12 — Wat de watcher over zichzelf zwijgt
+
+*Deze app bestaat om te zeggen wat er gebeurt en waar dat vandaan komt. Over zijn eigen gedrag doet
+hij dat niet: hij verandert van workspace zonder te zeggen wie dat vroeg, en hij gooit events weg
+zonder dat iemand het ziet. Dat is dezelfde fout als een kostentotaal dat er compleet uitziet en het
+niet is.*
+
+**P12-01 Zeg wie de workspace omzette, en laat `--watcher.workspace` echt pinnen** 🟢 — defect
+*Waargenomen, niet bedacht: de app werd gestart met
+`--watcher.workspace=/Users/cdeblend/Development/workspace-watcher` en keek achttien seconden later
+naar `/Users/cdeblend/Development/omv-master`. De feed meldt netjes `now watching …`, maar zegt
+nergens wie erom vroeg — en uit de code alleen viel het niet met zekerheid te herleiden, want
+`active.set` heeft meerdere aanroepers (de `watchWorkspace`-mutatie en het adopteren door
+`WorkspaceRegistry`). Voor een tool die om attributie draait is dat precies het gat dat hij bij
+anderen wél dichttimmert: het `WORKSPACE`-event hoort te dragen wat het omzette — een mutatie van de
+UI, adoptie na discovery, of de opdrachtregel.*
+
+*Daaronder zit een tweede vraag die eerst beantwoord moet worden. `application.yml` zegt letterlijk
+"pass `--watcher.workspace=/path/to/project`, to pin it to one instead", maar `props.getWorkspace()`
+wordt precies één keer gelezen, bij het opstarten in `ActiveWorkspace` regel 35. Daarna kan alles het
+overschrijven. Het is dus geen pin maar een beginwaarde. Óf het gedrag klopt en de tekst moet weg, óf
+de tekst klopt en een expliciet gezette workspace hoort latere wissels te weigeren. Nu is het geen
+van beide, en dat is de variant die iemand een uur zoeken kost.*
+
+**P12-02 Laat zien wat de watcher zelf laat vallen** 🟢
+*`EventStore` laat de nieuwste events vallen als de wachtrij vol loopt in plaats van een collector op
+te houden — dat is de juiste keuze en staat als invariant. Maar de teller gaat alleen naar het
+logbestand: `dropped` komt nul keer voor in `schema.graphqls`, dus het dashboard kan het niet weten.
+Tijdens een zware build kan de feed dus stilletjes onvolledig zijn en er volledig uitzien. Dat is
+dezelfde fout als een kostentotaal dat één model overslaat en dat niet zegt, en die is elders in dit
+project bewust wél opgelost. `Status` heeft al `transcriptDirs` om te zeggen of laag 1 leeft; een
+`droppedEvents` ernaast is dezelfde soort waarheid. De feed hoort het zichtbaar te maken op het
+moment dat het gebeurt, niet pas als iemand het logbestand opent.*
+
+---
+
 ## Epic 9 — Added: what the original list did not cover
 
 **P9-01 Event persistence (SQLite)** ✅
@@ -460,6 +496,23 @@ and multi-byte characters and truncation, `lsof` output including a sibling dire
 shares a prefix, hook payloads that are malformed or enormous, and an event stream that replays
 history then goes live without a gap, a duplicate, or an unbounded buffer. CI builds on JDK 25 and
 26, runs the tests on macOS, and checks that the jar actually starts and answers a query.*
+
+**P9-09 Een browsertest, want er is er geen enkele** 🟢
+*De backend heeft 142 tests, de frontend nul. Dat is niet waar de bugs zitten: CLAUDE.md documenteert
+inmiddels vier verschillende fouten in alleen al `followTail` — de virtualizer die zijn eigen
+`scroller` nodig heeft, `scrollToIndex` dat een shim bleek, het eigen scrollen dat de handler
+afvuurde en follow permanent uitzette, en de generatiewacht die tijdens een burst iedereen
+verdrong — plus Monaco dat losgekoppeld moet worden voor je zijn model weggooit, en een `<pre>` die
+groeit in plaats van scrollt. Stuk voor stuk met de hand gevonden in headless Chrome via CDP-scripts
+die daarna weggegooid worden: 61 daarvan in één sessie. Die scripts zijn de test die er al is, alleen
+niet bewaard.*
+
+*Het hoeft geen testpiramide te worden. Eén smoke-test die de app start, de pagina laadt, een rij in
+de feed aanklikt, een bestand aanklikt, tussen die twee heen en weer wisselt en controleert dat de
+console leeg blijft en de feed onderaan staat, had elk van bovenstaande gevangen. Playwright of
+gewoon CDP — het bestaande script is al geschreven. Let op de valkuil die dit project al kent: de
+build moet eerst draaien, want de assetnamen dragen een hash en een test tegen een oude bundel meet
+de vorige versie.*
 
 **P9-08 Packaging** 🟢
 A single runnable jar exists. A Homebrew formula and a `docker run` recipe are what make it
