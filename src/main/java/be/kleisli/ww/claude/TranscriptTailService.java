@@ -42,9 +42,16 @@ public class TranscriptTailService {
   private final EventBus bus;
   private final ObjectMapper mapper;
 
-  /** agentId -> kind of subagent, learned from that agent's own turns. */
+  /**
+   * agentId -> kind of subagent, learned from that agent's own turns.
+   *
+   * <p>Access-ordered, so an agent that is still working stays in the map. Insertion order would
+   * evict a long-running agent once 500 others had started, after which its tool results - which
+   * carry the id but not the kind - would fall back to a generic label and split away from its own
+   * calls.
+   */
   private final Map<String, String> agentKinds =
-      new LinkedHashMap<>() {
+      new LinkedHashMap<>(16, 0.75f, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
           return size() > 500;
@@ -267,7 +274,11 @@ public class TranscriptTailService {
       return null;
     }
     String agentId = root.path("agentId").asString(null);
-    String kind = root.path("attributionAgent").asString(null);
+    // A subagent started by a skill is named by the skill instead - "code-review",
+    // "superpowers:writing-plans". Thousands of records on this machine, and the name is right
+    // there; falling through to a generic label would throw away attribution we actually have.
+    String kind =
+        root.path("attributionAgent").asString(root.path("attributionSkill").asString(null));
     if (kind != null && !kind.isBlank()) {
       if (agentId != null) {
         agentKinds.put(agentId, kind);

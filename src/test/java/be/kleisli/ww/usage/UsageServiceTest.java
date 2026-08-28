@@ -21,6 +21,7 @@ class UsageServiceTest {
 
   @TempDir Path tmp;
 
+  private Path projects;
   private Path transcript;
   private UsageService usage;
 
@@ -28,7 +29,7 @@ class UsageServiceTest {
   void setUp() throws IOException {
     Path workspace = Files.createDirectory(tmp.resolve("project"));
     Path claudeHome = Files.createDirectory(tmp.resolve("claude"));
-    Path projects =
+    projects =
         Files.createDirectories(
             claudeHome.resolve("projects").resolve(TranscriptLocator.escapeCwd(workspace)));
     transcript = projects.resolve("session-a.jsonl");
@@ -216,5 +217,46 @@ class UsageServiceTest {
 
     append("claude-opus-5", 500_000, 0, 0, 0, 0);
     assertThat(usage.summarise(null).tokens().input()).isEqualTo(1_500_000);
+  }
+
+  private void appendTo(Path file, String model, long in, long out) throws IOException {
+    String line =
+        """
+        {"type":"assistant","message":{"model":"%s","usage":{"input_tokens":%d,\
+        "output_tokens":%d}}}
+        """
+            .formatted(model, in, out);
+    Files.writeString(file, line, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+  }
+
+  @Test
+  @DisplayName("counts what a subagent spent, on the bill of the session that delegated to it")
+  void countsSubagentTokens() throws IOException {
+    appendTo(transcript, "claude-opus-5", 1_000_000, 0);
+    Path agent =
+        Files.createDirectories(projects.resolve("session-a").resolve("subagents"))
+            .resolve("agent-abc.jsonl");
+    Files.writeString(agent, "");
+    appendTo(agent, "claude-opus-5", 1_000_000, 0);
+
+    // Measured on this machine before the fix: 5.5% of all tokens lived only in subagent files, so
+    // the feed showed the subagent's work while the cost pretended it had been free.
+    assertThat(usage.summarise(null).tokens().total()).isEqualTo(2_000_000);
+    assertThat(usage.summarise("session-a").tokens().total()).isEqualTo(2_000_000);
+  }
+
+  @Test
+  @DisplayName("does not put a subagent's tokens on another session's bill")
+  void subagentTokensStayWithTheirSession() throws IOException {
+    Path other = projects.resolve("session-b.jsonl");
+    Files.writeString(other, "");
+    appendTo(other, "claude-opus-5", 500_000, 0);
+    Path agent =
+        Files.createDirectories(projects.resolve("session-a").resolve("subagents"))
+            .resolve("agent-abc.jsonl");
+    Files.writeString(agent, "");
+    appendTo(agent, "claude-opus-5", 1_000_000, 0);
+
+    assertThat(usage.summarise("session-b").tokens().total()).isEqualTo(500_000);
   }
 }

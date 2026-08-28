@@ -30,6 +30,14 @@ spring:
       printer:
         enabled: true
 
+  task:
+    scheduling:
+      pool:
+        # Eight @Scheduled collectors, and the default is one thread for all of them. That puts the
+        # hook spool drain, whose whole point is to be prompt, in a queue behind a filesystem walk
+        # that paces itself on the assumption that it is not queued behind anything.
+        size: 4
+
 watcher:
   # Empty means discover it: the watcher waits for an agent hook to say which project is being
   # worked in, and otherwise reinstates whichever workspace was chosen last. Set this, or pass

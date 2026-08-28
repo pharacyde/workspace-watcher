@@ -132,7 +132,7 @@ LTS the build targets and the minimum the README promises — and runs the tests
 because that is the platform the process layer is written against and a green Linux build says
 less here than it usually would. Standard runners are free on public repositories.
 
-`mvn test`. 91 tests, deliberately aimed at the parsers and at the failure modes this project has
+`mvn test`. 114 tests, deliberately aimed at the parsers and at the failure modes this project has
 actually hit rather than at a coverage number. `GitServiceTest.resolvesVersionsFromASubdirectoryWorkspace`
 is the regression test for the worst bug so far and should not be deleted.
 
@@ -172,9 +172,18 @@ own `~/.claude`.
 - **The spool is a directory per project**, named with the same escaping Claude Code uses for
   transcripts, with a `.workspace` marker holding the real path because the escaping is not
   reversible. That marker is the whole registration mechanism.
-- **Do not reach for `isSidechain` to detect subagents.** It sounds like the field for it and is
-  never set - measured across sixty transcripts. The `Task`/`Agent` call carries `subagent_type`,
-  and that is what the UI shows.
+- **A subagent's work is in its own transcript**, under
+  `<session-id>/subagents/agent-<id>.jsonl`, not in the session transcript. A glob over the project
+  directory misses a whole directory level - 1111 files and 5.5% of the tokens on this machine.
+  There, `isSidechain` is set and `attributionAgent` (or `attributionSkill`, for a skill-started
+  agent) names the kind. An earlier note here claimed `isSidechain` is never set; that reading only
+  ever looked at session transcripts, where a subagent's records do not appear at all.
+- **The `subagent` field carries two facts, deliberately.** On a `Task`/`Agent` call it is the kind
+  launched; on a record from inside a subagent it is the kind that made the call. One field, so
+  filtering on a kind shows the delegation and its consequences together.
+- **`attributionAgent` is only on the agent's own turns.** `agentId` is on all of them, so the kind
+  is remembered per id in an access-ordered map - otherwise a call and the result coming back to it
+  land in different lanes.
 - **MCP tools are `mcp__server__tool`.** The server is a field of its own; the summary carries only
   the tool, because the raw name is mostly punctuation.
 - **A session title cannot come from the tail alone.** The tail skips whatever a transcript already

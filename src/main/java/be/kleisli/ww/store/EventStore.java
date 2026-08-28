@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.support.EncodedResource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -58,6 +59,8 @@ public class EventStore {
       String path,
       String agent,
       String sessionId,
+      String mcpServer,
+      String subagent,
       String detail,
       String workspace) {}
 
@@ -99,6 +102,16 @@ public class EventStore {
       // in db/schema.sql, where it is SQL rather than strings, and every statement in it is
       // idempotent so this is safe on every start.
       ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/schema.sql"));
+      // Separately, and tolerating failure: see the comment at the top of migrate.sql.
+      ScriptUtils.executeSqlScript(
+          connection,
+          new EncodedResource(new ClassPathResource("db/migrate.sql")),
+          true,
+          false,
+          ScriptUtils.DEFAULT_COMMENT_PREFIX,
+          ScriptUtils.DEFAULT_STATEMENT_SEPARATOR,
+          ScriptUtils.DEFAULT_BLOCK_COMMENT_START_DELIMITER,
+          ScriptUtils.DEFAULT_BLOCK_COMMENT_END_DELIMITER);
       connection.setAutoCommit(false);
       log.info("recording history to {}", file);
     } catch (IOException | SQLException e) {
@@ -132,6 +145,8 @@ public class EventStore {
             event.path(),
             event.agent(),
             event.sessionId(),
+            event.mcpServer(),
+            event.subagent(),
             detail,
             workspace.toString());
     if (!pending.offer(stored)) {
@@ -143,8 +158,16 @@ public class EventStore {
     }
   }
 
+  /*
+   * Everything below that touches `connection` is synchronized. One SQLite connection is shared by
+   * the flush, the hourly prune, the process sampler and every GraphQL query thread, and a JDBC
+   * connection is not safe to use from two threads at once - two transactions interleaving on it
+   * means one's rollback discards the other's work. Serialising them is cheap here: the writes are
+   * batched and the reads are counted in SQL, so nobody holds the lock long.
+   */
+
   @Scheduled(fixedDelayString = "${watcher.history-flush-ms:500}")
-  public void flush() {
+  public synchronized void flush() {
     if (connection == null || pending.isEmpty()) {
       return;
     }
@@ -154,8 +177,9 @@ public class EventStore {
         connection.prepareStatement(
             """
             INSERT INTO event
-              (seq, ts, source, type, summary, path, agent, session_id, detail, workspace)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\
+              (seq, ts, source, type, summary, path, agent, session_id, mcp_server,
+               subagent, detail, workspace)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\
             """)) {
       for (Stored e : batch) {
         statement.setString(1, e.seq());
@@ -166,8 +190,10 @@ public class EventStore {
         statement.setString(6, e.path());
         statement.setString(7, e.agent());
         statement.setString(8, e.sessionId());
-        statement.setString(9, e.detail());
-        statement.setString(10, e.workspace());
+        statement.setString(9, e.mcpServer());
+        statement.setString(10, e.subagent());
+        statement.setString(11, e.detail());
+        statement.setString(12, e.workspace());
         statement.addBatch();
       }
       statement.executeBatch();
@@ -189,7 +215,8 @@ public class EventStore {
    * @param since inclusive ISO-8601 lower bound, or null
    * @param until exclusive ISO-8601 upper bound, or null
    */
-  public List<Stored> history(String workspace, String since, String until, int limit) {
+  public synchronized List<Stored> history(
+      String workspace, String since, String until, int limit) {
     if (connection == null) {
       return List.of();
     }
@@ -203,7 +230,8 @@ public class EventStore {
     // than the oldest one.
     String sql =
         """
-        SELECT seq, ts, source, type, summary, path, agent, session_id, detail, workspace
+        SELECT seq, ts, source, type, summary, path, agent, session_id, mcp_server,
+               subagent, detail, workspace
         FROM event
         WHERE workspace = ?
           AND (? IS NULL OR ts >= ?)
@@ -232,7 +260,9 @@ public class EventStore {
                   rs.getString(7),
                   rs.getString(8),
                   rs.getString(9),
-                  rs.getString(10)));
+                  rs.getString(10),
+                  rs.getString(11),
+                  rs.getString(12)));
         }
       }
     } catch (SQLException e) {
@@ -252,7 +282,7 @@ public class EventStore {
    * thousands of times a second like events, so the batching that protects the collectors would
    * only add latency to something that has none.
    */
-  public void recordResources(String workspace, double cpu, long rssKb) {
+  public synchronized void recordResources(String workspace, double cpu, long rssKb) {
     if (connection == null) {
       return;
     }
@@ -271,7 +301,8 @@ public class EventStore {
   }
 
   /** Averaged per slice rather than summed: a rate does not add up over a window. */
-  public List<ResourceBucket> resourceActivity(String since, String until, int buckets) {
+  public synchronized List<ResourceBucket> resourceActivity(
+      String since, String until, int buckets) {
     if (connection == null) {
       return List.of();
     }
@@ -338,7 +369,8 @@ public class EventStore {
    * <p>Agent-caused events are counted separately because the two densities mean different things:
    * a thousand file events during a checkout is noise, ten tool calls is the story.
    */
-  public List<Bucket> activity(String workspace, String since, String until, int buckets) {
+  public synchronized List<Bucket> activity(
+      String workspace, String since, String until, int buckets) {
     if (connection == null) {
       return List.of();
     }
@@ -404,7 +436,7 @@ public class EventStore {
    * than anyone expected.
    */
   @Scheduled(fixedDelay = 3_600_000, initialDelay = 60_000)
-  public void prune() {
+  public synchronized void prune() {
     if (connection == null) {
       return;
     }

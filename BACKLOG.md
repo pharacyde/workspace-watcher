@@ -211,13 +211,19 @@ percentages — `limit_dollars` is `null` op een abonnement. De regel in CLAUDE.
 worden, niet stilzwijgend overtreden. Het principe blijft heel: er wordt niets geraden en de
 accountcredential blijft onaangeroerd; er wordt een bestand gelezen dat er toch al is.*
 
-**P10-11 Attributie gaat verloren bij opslag** 🟢 — defect
+**P10-11 Attributie gaat verloren bij opslag** ✅ (opslag) / 🟢 (attribution*-velden)
 *De tabel `event` heeft geen kolommen voor `mcp_server` en `subagent`, dus `ApiMapper.toEvent(Stored)`
 levert ze altijd null: de chips staan in de live feed en zijn weg zodra je een tijdlijnschijf
 aanklikt en uit de database leest. Bovendien wordt de MCP-server uit de naam `mcp__server__tool`
 gepeuterd terwijl Claude Code hem meelevert: assistant-records dragen `attributionMcpServer`,
 `attributionMcpTool`, `attributionSkill`, `attributionPlugin` en `attributionAgent`. Die laatste drie
 openen een dimensie die er nog niet is — welke skill of plugin een beurt aanstuurde.*
+
+*De opslag is gedaan: `event` heeft nu `mcp_server` en `subagent`, met een aparte `db/migrate.sql`
+die met foutentolerantie draait omdat SQLite geen `ADD COLUMN IF NOT EXISTS` kent — schema.sql zelf
+blijft streng, zodat een echte fout daar nog steeds de applicatie tegenhoudt. Getest op een database
+met de oude vorm. `attributionSkill` wordt nu ook gelezen. De rest van de `attribution*`-velden
+blijft open.*
 
 **P10-03 Duur per tool-call en per beurt** 🟢
 *De feed zegt wát er draaide en niet wat het kostte, terwijl dat in grote Maven-projecten de vraag is

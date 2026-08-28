@@ -225,12 +225,20 @@ export class Feed extends LitElement {
     return this.renderRoot.querySelector('lit-virtualizer');
   }
 
+  /**
+   * Supersedes an in-flight followTail. updated() fires one per frame while events stream, and the
+   * settle loop below spans several frames, so without this they overlap and each one forces its
+   * own layout - on exactly the frame budget the batching in this component exists to protect.
+   */
+  private followGeneration = 0;
+
   private async followTail(count: number) {
     // Two conditions, deliberately: the button is the intent, being scrolled to the bottom is the
     // moment. Following while someone has scrolled up to read would yank the view away from them.
     if (!this.follow || this.replay || count === 0) return;
     const list = this.list;
     if (!list) return;
+    const generation = ++this.followGeneration;
 
     // Awaiting layoutComplete is the part that matters: the virtualizer measures its rows
     // asynchronously, so before it resolves scrollHeight does not yet include the rows that just
@@ -240,7 +248,7 @@ export class Feed extends LitElement {
     // remove, and it threw "Cannot set properties of null" on a row it had not laid out yet.
     // With the scroller attribute set, this element is the scroll container, so this is direct.
     await list.layoutComplete;
-    if (!this.follow) return;
+    if (!this.follow || generation !== this.followGeneration) return;
 
     // Scrolling once is not enough. The virtualizer re-measures rows after layoutComplete has
     // resolved, so the height we just scrolled to can already be stale - most visibly when the
@@ -252,7 +260,7 @@ export class Feed extends LitElement {
       previous = list.scrollHeight;
       list.scrollTop = list.scrollHeight;
       await new Promise(requestAnimationFrame);
-      if (!this.follow) return;
+      if (!this.follow || generation !== this.followGeneration) return;
     }
   }
 

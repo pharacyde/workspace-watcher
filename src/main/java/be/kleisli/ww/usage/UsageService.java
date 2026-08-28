@@ -105,14 +105,28 @@ public class UsageService {
   /** Usage for one session, or for the whole workspace when {@code sessionId} is null. */
   public Summary summarise(String sessionId) {
     Map<String, TokenUsage> byModel = new LinkedHashMap<>();
-    for (Path transcript : locator.transcripts()) {
-      String name = transcript.getFileName().toString();
-      if (sessionId != null && !name.equals(sessionId + ".jsonl")) {
+    for (Path transcript : locator.everyTranscript()) {
+      if (sessionId != null && !sessionId.equals(sessionFor(transcript))) {
         continue;
       }
       read(transcript).forEach((model, usage) -> byModel.merge(model, usage, TokenUsage::plus));
     }
     return summarise(byModel);
+  }
+
+  /**
+   * The session a transcript belongs to.
+   *
+   * <p>For a session transcript that is the file name; for a subagent's it is the directory two
+   * levels up, because a subagent's tokens are spent on behalf of the session that delegated to it
+   * and belong on that session's bill.
+   */
+  private static String sessionFor(Path transcript) {
+    String name = transcript.getFileName().toString();
+    if (name.startsWith("agent-")) {
+      return TranscriptLocator.sessionOf(transcript);
+    }
+    return name.endsWith(".jsonl") ? name.substring(0, name.length() - ".jsonl".length()) : name;
   }
 
   private Summary summarise(Map<String, TokenUsage> byModel) {
@@ -253,7 +267,7 @@ public class UsageService {
     long width = Math.max(1, (to - from) / slices);
 
     Map<Integer, long[]> sums = new LinkedHashMap<>();
-    for (Path transcript : locator.transcripts()) {
+    for (Path transcript : locator.everyTranscript()) {
       read(transcript);
       Cached cached = cache.get(transcript);
       if (cached == null) {
@@ -293,7 +307,7 @@ public class UsageService {
   public TokenUsage inLastSeconds(long seconds) {
     long from = Instant.now().getEpochSecond() - seconds;
     TokenUsage total = TokenUsage.NONE;
-    for (Path transcript : locator.transcripts()) {
+    for (Path transcript : locator.everyTranscript()) {
       read(transcript);
       Cached cached = cache.get(transcript);
       if (cached == null) {

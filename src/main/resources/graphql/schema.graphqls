@@ -21,10 +21,13 @@ type WatchEvent {
   mcpServer: String
 
   """
-  Kind of subagent this call launched, when it launched one.
+  Kind of agent involved, when one was.
 
-  Read from the launch rather than from isSidechain, which sounds like the right field and is never
-  set in practice.
+  Two facts share this field: on a Task/Agent call it is the kind that was launched, on a record
+  written from inside a subagent it is the kind that made the call. A client cannot tell the two
+  apart, and does not need to - filtering on a kind is meant to show the delegation and the work it
+  caused together. The source of the record is what distinguishes them: subagent work carries its
+  own agentId in detail.
   """
   subagent: String
   sessionId: String

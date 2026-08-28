@@ -284,4 +284,36 @@ class TranscriptTailServiceTest {
 """
         .formatted(tool, input);
   }
+
+  @Test
+  @DisplayName("names a skill-started subagent by its skill")
+  void namesSkillStartedSubagents() throws IOException {
+    Path agent = subagentTranscript("session", "skill1");
+    poll();
+    appendTo(
+        agent,
+"""
+{"type":"assistant","sessionId":"s1","isSidechain":true,"attributionSkill":"code-review",\
+"agentId":"skill1","message":{"content":[\
+{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"/a/b.txt"}}]}}\
+""");
+
+    // Thousands of records on this machine carry attributionSkill and no attributionAgent; falling
+    // through to a generic label would throw away a name that is right there.
+    assertThat(poll()).last().satisfies(e -> assertThat(e.subagent()).isEqualTo("code-review"));
+  }
+
+  @Test
+  @DisplayName("the tail skips a finished subagent while the cost still counts it")
+  void tailAndCostUseDifferentWindows() throws IOException {
+    Path agent = subagentTranscript("session", "old1");
+    Files.setLastModifiedTime(
+        agent, java.nio.file.attribute.FileTime.from(java.time.Instant.now().minusSeconds(86_400)));
+
+    TranscriptLocator locator = new TranscriptLocator(props, active);
+    // Subagent transcripts are never cleaned up, so the tail bounds what it opens by recency. What
+    // was spent does not go stale, so the same bound would make the total wrong.
+    assertThat(locator.allTranscripts()).containsExactly(transcript);
+    assertThat(locator.everyTranscript()).containsExactlyInAnyOrder(transcript, agent);
+  }
 }

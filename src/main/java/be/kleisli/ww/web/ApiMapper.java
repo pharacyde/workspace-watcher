@@ -112,6 +112,8 @@ public class ApiMapper {
         .path(stored.path())
         .agent(stored.agent())
         .sessionId(stored.sessionId())
+        .mcpServer(stored.mcpServer())
+        .subagent(stored.subagent())
         .detail(stored.detail())
         .build();
   }

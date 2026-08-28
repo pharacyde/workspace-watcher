@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS event (
   path       TEXT,
   agent      TEXT,
   session_id TEXT,
+  mcp_server TEXT,
+  subagent   TEXT,
   detail     TEXT,
   workspace  TEXT    NOT NULL
 );

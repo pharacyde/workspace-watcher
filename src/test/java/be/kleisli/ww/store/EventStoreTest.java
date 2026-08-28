@@ -180,4 +180,64 @@ class EventStoreTest {
     assertThat(w.store().history(null, null, null, 10)).isEmpty();
     assertThat(Files.exists(database)).isFalse();
   }
+
+  @Test
+  @DisplayName("keeps MCP and subagent attribution across the database round trip")
+  void keepsAttribution() {
+    Wiring w = open();
+    w.bus()
+        .publish(
+            WatchEvent.of(WatchEvent.Source.TRANSCRIPT, "TOOL_USE")
+                .summary("build")
+                .mcpServer("jenkins")
+                .subagent("Explore"));
+    w.store().flush();
+
+    // Without these columns a replayed event came back untagged, which does not read as "unknown"
+    // but as "the main agent did this" - inventing attribution rather than declining to.
+    assertThat(w.store().history(null, null, null, 100))
+        .singleElement()
+        .satisfies(
+            e -> {
+              assertThat(e.mcpServer()).isEqualTo("jenkins");
+              assertThat(e.subagent()).isEqualTo("Explore");
+            });
+  }
+
+  @Test
+  @DisplayName("adds the attribution columns to a database written before they existed")
+  void migratesAnOlderDatabase() throws Exception {
+    Files.createDirectories(database.getParent());
+    try (java.sql.Connection c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + database);
+        java.sql.Statement st = c.createStatement()) {
+      st.executeUpdate(
+          """
+          CREATE TABLE event (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, seq TEXT NOT NULL, ts TEXT NOT NULL,
+            source TEXT NOT NULL, type TEXT NOT NULL, summary TEXT, path TEXT, agent TEXT,
+            session_id TEXT, detail TEXT, workspace TEXT NOT NULL)\
+          """);
+    }
+
+    Wiring w = open();
+    w.bus().publish(WatchEvent.of(WatchEvent.Source.HOOK, "TOOL_USE").subagent("fork"));
+    w.store().flush();
+
+    assertThat(w.store().history(null, null, null, 100))
+        .singleElement()
+        .satisfies(e -> assertThat(e.subagent()).isEqualTo("fork"));
+  }
+
+  @Test
+  @DisplayName("opening twice does not fail on the migration it already applied")
+  void migrationIsIdempotent() {
+    open().store();
+    Wiring second = open();
+    second.bus().publish(WatchEvent.of(WatchEvent.Source.FS, "CREATED").summary("after"));
+    second.store().flush();
+
+    assertThat(second.store().history(null, null, null, 100))
+        .extracting(EventStore.Stored::summary)
+        .contains("after");
+  }
 }
