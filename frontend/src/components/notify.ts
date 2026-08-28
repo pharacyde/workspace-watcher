@@ -16,6 +16,52 @@ const LABELS: Record<Mode, string> = {
 
 const BASE_TITLE = 'workspace-watcher';
 
+/**
+ * Draws the tab icon, with a dot when something is waiting.
+ *
+ * <p>Drawn rather than shipped, so there is no asset to load or get wrong, and so the badge is a
+ * property of the same state the title carries. In Safari a background tab is mostly its icon - the
+ * title is truncated to a few characters - which makes this the more visible half of the fallback,
+ * not the decoration on top of it.
+ */
+function paintIcon(badge: boolean) {
+  const size = 32;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+
+  context.fillStyle = '#161a21';
+  context.fillRect(0, 0, size, size);
+
+  // An eye: the whole point of the thing is watching.
+  context.strokeStyle = '#7aa2f7';
+  context.lineWidth = 2.5;
+  context.beginPath();
+  context.ellipse(16, 16, 12, 7.5, 0, 0, Math.PI * 2);
+  context.stroke();
+  context.fillStyle = '#7aa2f7';
+  context.beginPath();
+  context.arc(16, 16, 4, 0, Math.PI * 2);
+  context.fill();
+
+  if (badge) {
+    context.fillStyle = '#e06c75';
+    context.beginPath();
+    context.arc(25, 7, 6, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    document.head.appendChild(link);
+  }
+  link.href = canvas.toDataURL('image/png');
+}
+
 const STORAGE_KEY = 'ww-notify-mode';
 
 /** Nothing older than this is announced, so replayed history cannot set off a burst on connect. */
@@ -76,6 +122,8 @@ export class Notify extends LitElement {
     super.connectedCallback();
     this.release = subscribe(EventsDocument, (data) => this.consider(data.events));
     document.addEventListener('visibilitychange', this.onVisibility);
+    // There is no favicon file; the tab shows a blank page icon until this runs.
+    paintIcon(false);
   }
 
   disconnectedCallback(): void {
@@ -88,6 +136,7 @@ export class Notify extends LitElement {
     if (document.hidden) return;
     this.missed = 0;
     document.title = BASE_TITLE;
+    paintIcon(false);
   };
 
   /** What is worth interrupting someone for. Everything else stays in the feed. */
@@ -112,6 +161,7 @@ export class Notify extends LitElement {
     // works in some browsers is worse than one that always does something.
     this.missed += 1;
     document.title = `(${this.missed}) ${BASE_TITLE}`;
+    paintIcon(true);
 
     const now = Date.now();
     if (now - this.lastAt < QUIET_MS) {

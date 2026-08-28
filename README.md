@@ -245,6 +245,10 @@ actually tracks it, and a submodule entry is labelled as such rather than as a m
 
 ### Staying current
 
+A tab left open keeps running the bundle it started with, including the bundle from before this
+existed — which is why it appears to do nothing the first time. One refresh puts the tab on a build
+that carries the detector, and from then on it maintains itself.
+
 A tab left open keeps running the bundle it started with. The header shows **↻ new build** when the
 frontend has been rebuilt underneath it, and reloads itself if the tab is in the background — a page
 someone is reading should not lose its scroll position and filters without being asked.
@@ -277,8 +281,14 @@ Failures, guard blocks and finished agents are announced while the tab is in the
 only then: a notification for something you are already watching happen is noise.
 
 If the browser refuses permission — **Safari will not grant it on a plain `http` origin** — the tab
-title carries the count instead (`(3) workspace-watcher`), which needs no permission and works
-everywhere. The button says which of the two you are getting.
+title carries the count instead (`(3) workspace-watcher`), and the tab icon gets a red dot — drawn
+on a canvas, so there is no asset to ship. In Safari a background tab is mostly its icon, with the
+title truncated to a few characters, which makes the dot the more visible half rather than the
+decoration on top.
+
+Worth knowing before blaming the certificate: Safari has a single setting,
+**Settings → Websites → Notifications → "Allow websites to ask for permission"**, and with it off
+`requestPermission()` returns denied immediately for every site, HTTPS or not. The button says which of the two you are getting.
 
 ## Guard (optional)
 
