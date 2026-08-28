@@ -58,6 +58,22 @@ public class TranscriptTailService {
         }
       };
 
+  /**
+   * The workspace the offsets below were established for, and whether that has happened yet.
+   *
+   * <p>The first poll after start, and the first after a workspace switch, is a baseline: every
+   * transcript it finds already existed and is history. After that, a file we have not seen before
+   * did not exist at the previous poll, so it was created while we were watching and every line in
+   * it is ours to report.
+   *
+   * <p>This replaced a comparison against the file's creation time, which macOS reports only to the
+   * second - so a transcript created in the same second the watcher started was indistinguishable
+   * from one that had been there for an hour. Whether we saw the file last time needs no clock.
+   */
+  private Path baselineWorkspace;
+
+  private boolean baselineTaken;
+
   /** Byte offset consumed so far, per transcript file. */
   private final Map<Path, Long> offsets = new HashMap<>();
 
@@ -85,20 +101,36 @@ public class TranscriptTailService {
 
   @Scheduled(fixedDelayString = "${watcher.transcript-poll-ms:500}")
   public void poll() {
-    for (Path file : locator.allTranscripts()) {
-      tail(file);
+    Path workspace = active.get();
+    // A switch makes every transcript of the new project unknown to us at once. Without this they
+    // would all count as new and the feed would be buried under a replay of the whole project.
+    boolean baseline = !baselineTaken || !java.util.Objects.equals(workspace, baselineWorkspace);
+    if (baseline) {
+      offsets.clear();
+      baselineWorkspace = workspace;
+      baselineTaken = true;
+    }
+    for (Path file : locator.tailable()) {
+      tail(file, baseline);
     }
   }
 
-  private void tail(Path file) {
+  private void tail(Path file, boolean baseline) {
     try (RandomAccessFile raf = new RandomAccessFile(file.toFile(), "r")) {
       long length = raf.length();
       Long known = offsets.get(file);
       if (known == null) {
-        // A transcript that already exists when we start is history, not activity.
-        // Replaying it would drown the live session in noise.
-        offsets.put(file, length);
-        return;
+        // A transcript that was already there on the baseline poll is history, not activity:
+        // replaying a finished 24 MB session would bury the live one. A file that appears later is
+        // the opposite - a session or a subagent that began while we were watching. That matters
+        // most for subagents, whose directory does not exist until a session first delegates, so
+        // by the time we can see the file it already has lines in it. Skipping those would lose
+        // what the agent did in its first seconds permanently, rather than reporting it late.
+        offsets.put(file, baseline ? length : 0L);
+        if (baseline) {
+          return;
+        }
+        known = 0L;
       }
       if (length < known) {
         // Truncated or rotated: resync rather than read garbage.

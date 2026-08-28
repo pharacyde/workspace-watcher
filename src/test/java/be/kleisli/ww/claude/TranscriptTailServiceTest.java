@@ -272,7 +272,7 @@ class TranscriptTailServiceTest {
 
     TranscriptLocator locator = new TranscriptLocator(props, active);
     assertThat(locator.transcripts()).containsExactly(transcript);
-    assertThat(locator.allTranscripts()).hasSize(2);
+    assertThat(locator.tailable()).hasSize(2);
   }
 
   private static String sidechainToolUse(String tool, String input) {
@@ -313,7 +313,39 @@ class TranscriptTailServiceTest {
     TranscriptLocator locator = new TranscriptLocator(props, active);
     // Subagent transcripts are never cleaned up, so the tail bounds what it opens by recency. What
     // was spent does not go stale, so the same bound would make the total wrong.
-    assertThat(locator.allTranscripts()).containsExactly(transcript);
-    assertThat(locator.everyTranscript()).containsExactlyInAnyOrder(transcript, agent);
+    assertThat(locator.tailable()).containsExactly(transcript);
+    assertThat(locator.forCosting()).containsExactlyInAnyOrder(transcript, agent);
+  }
+
+  @Test
+  @DisplayName("reports a subagent that started after we did, from its first line")
+  void doesNotLoseTheStartOfANewSubagent() throws IOException {
+    // The reviewer's case, and the one that matters: subagents/ does not exist until a session
+    // first delegates, so the directory listing cannot have found it beforehand. By the time the
+    // tail sees the file it already has lines in it - and treating those as pre-existing history
+    // would discard everything the agent did in its first seconds, permanently rather than late.
+    poll();
+
+    Path agent = subagentTranscript("session", "late1");
+    appendTo(agent, sidechainToolUse("Bash", "{\"command\":\"echo first thing I did\"}"));
+
+    assertThat(poll())
+        .singleElement()
+        .satisfies(
+            e -> {
+              assertThat(e.summary()).contains("echo first thing I did");
+              assertThat(e.subagent()).isEqualTo("Explore");
+            });
+  }
+
+  @Test
+  @DisplayName("still treats a transcript that predates the watcher as history")
+  void olderTranscriptsAreStillSkipped() throws IOException {
+    // The other half of the same rule: reading a finished 24 MB transcript from the top would bury
+    // the live session, which is why the offset starts at the end for anything that was there
+    // before we were.
+    append(toolUse("Bash", "{\"command\":\"echo old\"}"));
+
+    assertThat(poll()).isEmpty();
   }
 }

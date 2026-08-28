@@ -248,7 +248,12 @@ export class Feed extends LitElement {
     // remove, and it threw "Cannot set properties of null" on a row it had not laid out yet.
     // With the scroller attribute set, this element is the scroll container, so this is direct.
     await list.layoutComplete;
-    if (!this.follow || generation !== this.followGeneration) return;
+    if (!this.follow) return;
+
+    // Deliberately not checking the generation here. layoutComplete routinely takes longer than a
+    // frame, and updated() fires once per frame while events stream, so every call would find
+    // itself superseded before it ever scrolled - the feed would stop following during exactly the
+    // burst this exists for. Every call scrolls at least once; only the settling below gives way.
 
     // Scrolling once is not enough. The virtualizer re-measures rows after layoutComplete has
     // resolved, so the height we just scrolled to can already be stale - most visibly when the

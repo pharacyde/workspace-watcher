@@ -19,6 +19,7 @@ import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
@@ -63,6 +64,9 @@ public class EventStore {
       String subagent,
       String detail,
       String workspace) {}
+
+  /** Where the database lives, so a read can open its own connection to it. */
+  private volatile Path databaseFile;
 
   private final WatcherProperties props;
   private final ActiveWorkspace active;
@@ -113,6 +117,18 @@ public class EventStore {
           ScriptUtils.DEFAULT_BLOCK_COMMENT_START_DELIMITER,
           ScriptUtils.DEFAULT_BLOCK_COMMENT_END_DELIMITER);
       connection.setAutoCommit(false);
+      // continueOnError above cannot tell "the column was already there" from "the database is
+      // read-only". Without this check the difference shows up only as a warning every 500 ms
+      // while enabled() keeps claiming history is on - so the check is here, and a database that
+      // did not come out right disables history loudly instead of losing it quietly.
+      if (!hasColumns(connection, "mcp_server", "subagent")) {
+        log.error(
+            "history is disabled; {} is missing columns the migration should have added", file);
+        connection.close();
+        connection = null;
+        return;
+      }
+      databaseFile = file;
       log.info("recording history to {}", file);
     } catch (IOException | SQLException e) {
       log.warn("history is disabled; cannot open {}: {}", location, e.toString());
@@ -166,6 +182,36 @@ public class EventStore {
    * batched and the reads are counted in SQL, so nobody holds the lock long.
    */
 
+  private static boolean hasColumns(Connection c, String... required) throws SQLException {
+    Set<String> present = new java.util.HashSet<>();
+    try (PreparedStatement st = c.prepareStatement("PRAGMA table_info(event)");
+        ResultSet rs = st.executeQuery()) {
+      while (rs.next()) {
+        present.add(rs.getString("name"));
+      }
+    }
+    return present.containsAll(List.of(required));
+  }
+
+  /**
+   * A connection of this reader's own.
+   *
+   * <p>The writes share one connection under one lock, because SQLite has one writer. Reads must
+   * not join that queue: the schema turns on WAL precisely so a long read cannot block the writer,
+   * and routing every GraphQL query through the writer's monitor would hand that back - an hourly
+   * prune over millions of rows would stall the flush, whose queue then fills and drops the newest
+   * events. Opening a connection is cheap against reading the rows it is about to read.
+   */
+  private Connection openForReading() throws SQLException {
+    Path file = databaseFile;
+    if (file == null) {
+      throw new SQLException("history is not open");
+    }
+    // Not marked read-only: the driver rejects the flag once the connection exists, and pointing
+    // it at SQLiteConfig for one hint is not worth the coupling. The three callers only SELECT.
+    return DriverManager.getConnection("jdbc:sqlite:" + file);
+  }
+
   @Scheduled(fixedDelayString = "${watcher.history-flush-ms:500}")
   public synchronized void flush() {
     if (connection == null || pending.isEmpty()) {
@@ -215,9 +261,8 @@ public class EventStore {
    * @param since inclusive ISO-8601 lower bound, or null
    * @param until exclusive ISO-8601 upper bound, or null
    */
-  public synchronized List<Stored> history(
-      String workspace, String since, String until, int limit) {
-    if (connection == null) {
+  public List<Stored> history(String workspace, String since, String until, int limit) {
+    if (databaseFile == null) {
       return List.of();
     }
     Path fallback = active.get();
@@ -240,7 +285,8 @@ public class EventStore {
         LIMIT ?\
         """;
     List<Stored> rows = new ArrayList<>();
-    try (PreparedStatement statement = connection.prepareStatement(sql)) {
+    try (Connection reader = openForReading();
+        PreparedStatement statement = reader.prepareStatement(sql)) {
       statement.setString(1, target);
       statement.setString(2, since);
       statement.setString(3, since);
@@ -301,9 +347,8 @@ public class EventStore {
   }
 
   /** Averaged per slice rather than summed: a rate does not add up over a window. */
-  public synchronized List<ResourceBucket> resourceActivity(
-      String since, String until, int buckets) {
-    if (connection == null) {
+  public List<ResourceBucket> resourceActivity(String since, String until, int buckets) {
+    if (databaseFile == null) {
       return List.of();
     }
     Path workspace = active.get();
@@ -332,7 +377,8 @@ public class EventStore {
         """;
 
     List<ResourceBucket> result = new ArrayList<>();
-    try (PreparedStatement statement = connection.prepareStatement(sql)) {
+    try (Connection reader = openForReading();
+        PreparedStatement statement = reader.prepareStatement(sql)) {
       statement.setLong(1, from);
       statement.setLong(2, width);
       statement.setString(3, workspace.toString());
@@ -369,9 +415,8 @@ public class EventStore {
    * <p>Agent-caused events are counted separately because the two densities mean different things:
    * a thousand file events during a checkout is noise, ten tool calls is the story.
    */
-  public synchronized List<Bucket> activity(
-      String workspace, String since, String until, int buckets) {
-    if (connection == null) {
+  public List<Bucket> activity(String workspace, String since, String until, int buckets) {
+    if (databaseFile == null) {
       return List.of();
     }
     Path fallback = active.get();
@@ -404,7 +449,8 @@ public class EventStore {
         """;
 
     List<Bucket> result = new ArrayList<>();
-    try (PreparedStatement statement = connection.prepareStatement(sql)) {
+    try (Connection reader = openForReading();
+        PreparedStatement statement = reader.prepareStatement(sql)) {
       statement.setLong(1, from);
       statement.setLong(2, width);
       statement.setString(3, target);
@@ -476,7 +522,7 @@ public class EventStore {
   }
 
   @PreDestroy
-  void close() {
+  synchronized void close() {
     if (unsubscribe != null) {
       unsubscribe.run();
     }

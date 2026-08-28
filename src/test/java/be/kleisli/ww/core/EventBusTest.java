@@ -89,4 +89,39 @@ class EventBusTest {
         .thenCancel()
         .verify(java.time.Duration.ofSeconds(10));
   }
+
+  @Test
+  @DisplayName("numbers and appends under one lock, so a subscriber joining mid-flight sees no gap")
+  void noGapWhenPublishersRace() throws Exception {
+    // The collectors run on a scheduler pool, so several of them publish at the same time as a
+    // matter of course. Numbering outside the lock lets two swap order between taking a number and
+    // appending; a subscriber registering in that gap snapshots the higher number and the lower one
+    // is then filtered out as a duplicate - a silent hole in the feed, which is the one thing the
+    // subscription is not allowed to have.
+    EventBus bus = busWithHistory(20_000);
+    int threads = 8;
+    int each = 500;
+    java.util.concurrent.ExecutorService pool =
+        java.util.concurrent.Executors.newFixedThreadPool(threads);
+    java.util.concurrent.CountDownLatch go = new java.util.concurrent.CountDownLatch(1);
+    for (int t = 0; t < threads; t++) {
+      pool.submit(
+          () -> {
+            go.await();
+            for (int i = 0; i < each; i++) {
+              bus.publish(event("e"));
+            }
+            return null;
+          });
+    }
+    go.countDown();
+    pool.shutdown();
+    assertThat(pool.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+    List<Long> seqs = bus.replay().stream().map(WatchEvent::seq).toList();
+    assertThat(seqs).hasSize(threads * each);
+    // Appended in the same order they were numbered: any inversion here is the race above.
+    assertThat(seqs).isSorted();
+    assertThat(seqs.get(seqs.size() - 1)).isEqualTo((long) threads * each);
+  }
 }

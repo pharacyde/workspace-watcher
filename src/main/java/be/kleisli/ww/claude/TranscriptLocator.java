@@ -9,7 +9,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import org.springframework.stereotype.Component;
 
@@ -31,21 +30,6 @@ public class TranscriptLocator {
    * in hours has finished, and a finished agent produces no further activity.
    */
   private static final Duration SUBAGENT_WINDOW = Duration.ofHours(2);
-
-  /**
-   * How long a directory listing is reused before it is taken again.
-   *
-   * <p>Finding the subagent directories means listing every session directory of the workspace, and
-   * that set only changes when a session starts. Doing it on every 500 ms poll cost hundreds of
-   * stat calls a second on a project with a long history, to rediscover exactly what was there
-   * before. The files inside are still checked every poll; only the search for the directories is
-   * held.
-   */
-  private static final Duration DISCOVERY_TTL = Duration.ofSeconds(5);
-
-  private record Discovery(Path workspace, Instant taken, List<Path> subagentDirs) {}
-
-  private final AtomicReference<Discovery> discovery = new AtomicReference<>();
 
   private final WatcherProperties props;
   private final ActiveWorkspace active;
@@ -103,17 +87,17 @@ public class TranscriptLocator {
   /**
    * The {@code subagents} directories of this workspace, one per session that delegated.
    *
-   * <p>Cached for {@link #DISCOVERY_TTL}: the answer changes only when a session starts, and the
-   * search is the expensive half of finding a subagent transcript.
+   * <p>Listed on every poll, deliberately. An earlier version held this for five seconds, and the
+   * directory is created at the moment a session first delegates - so a subagent starting inside
+   * that window was not merely found late, it was found with lines already in it and skipped as
+   * history. Everything it did in its first seconds was lost rather than delayed, which is the one
+   * outcome worse than being slow.
+   *
+   * <p>The saving did not justify it either: measured on the largest project here, 745 transcripts
+   * across 187 sessions, one full listing costs about 1 ms. Twice a second that is well under a
+   * percent of one core.
    */
   private List<Path> subagentDirs() {
-    Path workspace = active.get();
-    Discovery known = discovery.get();
-    if (known != null
-        && known.taken().isAfter(Instant.now().minus(DISCOVERY_TTL))
-        && java.util.Objects.equals(known.workspace(), workspace)) {
-      return known.subagentDirs();
-    }
     List<Path> dirs = new ArrayList<>();
     for (Path dir : directories()) {
       try (Stream<Path> sessions = Files.list(dir)) {
@@ -125,7 +109,6 @@ public class TranscriptLocator {
         // A directory that vanished between listing and reading simply is not there.
       }
     }
-    discovery.set(new Discovery(workspace, Instant.now(), List.copyOf(dirs)));
     return dirs;
   }
 
@@ -167,12 +150,17 @@ public class TranscriptLocator {
   }
 
   /**
-   * Everything the tail should follow: the sessions, plus the subagents still being written to.
+   * What the tail should follow: the sessions, plus the subagents still being written to.
+   *
+   * <p>Named for its purpose rather than its contents, because the only difference from {@link
+   * #forCosting()} is a recency window that no call site can see. "all" and "every" read as
+   * synonyms and were swappable without the compiler noticing - and swapping them silently
+   * understates what a workspace cost.
    *
    * <p>Subagent transcripts are never cleaned up - over a thousand on this machine - and one that
    * has been untouched for hours has finished. Opening those on every poll would buy nothing.
    */
-  public List<Path> allTranscripts() {
+  public List<Path> tailable() {
     Instant since = Instant.now().minus(SUBAGENT_WINDOW);
     List<Path> all = new ArrayList<>(transcripts());
     subagentTranscripts().stream().filter(f -> modifiedAfter(f, since)).forEach(all::add);
@@ -180,12 +168,12 @@ public class TranscriptLocator {
   }
 
   /**
-   * Every transcript there is, however old.
+   * What the cost calculation should read: every transcript there is, however old.
    *
    * <p>What was spent is history and does not go stale, so the recency window that bounds the tail
    * would only make the total wrong here.
    */
-  public List<Path> everyTranscript() {
+  public List<Path> forCosting() {
     List<Path> all = new ArrayList<>(transcripts());
     all.addAll(subagentTranscripts());
     return all;

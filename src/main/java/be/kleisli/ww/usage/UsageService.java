@@ -105,7 +105,7 @@ public class UsageService {
   /** Usage for one session, or for the whole workspace when {@code sessionId} is null. */
   public Summary summarise(String sessionId) {
     Map<String, TokenUsage> byModel = new LinkedHashMap<>();
-    for (Path transcript : locator.everyTranscript()) {
+    for (Path transcript : locator.forCosting()) {
       if (sessionId != null && !sessionId.equals(sessionFor(transcript))) {
         continue;
       }
@@ -267,7 +267,7 @@ public class UsageService {
     long width = Math.max(1, (to - from) / slices);
 
     Map<Integer, long[]> sums = new LinkedHashMap<>();
-    for (Path transcript : locator.everyTranscript()) {
+    for (Path transcript : locator.forCosting()) {
       read(transcript);
       Cached cached = cache.get(transcript);
       if (cached == null) {
@@ -307,7 +307,7 @@ public class UsageService {
   public TokenUsage inLastSeconds(long seconds) {
     long from = Instant.now().getEpochSecond() - seconds;
     TokenUsage total = TokenUsage.NONE;
-    for (Path transcript : locator.everyTranscript()) {
+    for (Path transcript : locator.forCosting()) {
       read(transcript);
       Cached cached = cache.get(transcript);
       if (cached == null) {

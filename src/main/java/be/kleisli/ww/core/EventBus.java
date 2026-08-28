@@ -41,8 +41,15 @@ public class EventBus {
   }
 
   public WatchEvent publish(WatchEvent.Builder builder) {
-    WatchEvent event = builder.build(seq.incrementAndGet());
+    WatchEvent event;
+    // The number is taken under the same lock that appends, not before it. Taking it outside lets
+    // two publishers swap order between numbering and appending: a subscriber registering in that
+    // gap snapshots history ending at the higher number, and the lower one is then filtered out by
+    // the sequence check that is supposed to remove duplicates. That is the silent hole in the feed
+    // the design forbids, and it stopped being a narrow race the moment the collectors got more
+    // than one thread to run on.
     synchronized (history) {
+      event = builder.build(seq.incrementAndGet());
       history.addLast(event);
       while (history.size() > historySize) {
         history.removeFirst();
