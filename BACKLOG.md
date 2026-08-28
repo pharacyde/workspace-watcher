@@ -158,8 +158,8 @@ and a virtualised list are the two libraries that actually earn their weight her
 
 **P9-03 Agent adapter interface** 🟢
 Layer 1 is Claude-Code-specific today. Make it an interface so Aider, Codex, OpenClaw, Gemini CLI
-and custom scripts each get an adapter, with the hook endpoint as the generic fallback for anything
-that can run a shell command.
+and custom scripts each get an adapter. The spool directory is already the generic fallback: any
+agent that can write a JSON file gets picked up, with no network and no client library.
 
 **P9-04 Endpoint Security Framework backend (research spike)** 🔴 today
 The only real route to file→PID attribution for non-agent processes. Requires a system extension,

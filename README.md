@@ -105,28 +105,40 @@ moment they happen, install the hook:
 }
 ```
 
-The script base64-encodes the payload from stdin and posts it as the `recordAgentEvent` mutation.
-Base64 sidesteps every shell and JSON quoting problem without needing `jq` or `python` on the host.
+By default the script writes the payload into a spool directory and the watcher drains it. That
+choice is worth explaining, because the obvious alternatives are both worse. Measured on loopback:
 
-It always exits 0 and discards all output. A hook blocks the agent until it returns, and an observer
-must never be able to block or alter the agent it is watching. Measured on loopback:
+| transport | cost per tool call | dependencies | survives watcher being down |
+|---|---|---|---|
+| **spool file** (default) | **~5 ms** | none | **yes — waits on disk** |
+| GraphQL mutation over HTTP | 20 ms | curl | no, event is lost |
+| graphql-ws subscription | 50 ms | node or websocat | no, event is lost |
 
-| watcher state | cost per tool call |
-|---|---|
-| running | 20 ms, or 90 ms for a 1.5 MB payload |
-| not running | 10 ms — the connection is refused immediately |
-| accepting but stalled | 2 s once, then 10 ms for a minute (circuit breaker) |
+A WebSocket is the wrong shape here. A hook is a *fresh process per tool call*, so there is nothing
+for a persistent connection to amortise — the handshake is paid every single time. WebSockets earn
+their place where traffic is long-lived and many-messaged, which is exactly where this project does
+use one: the browser subscription. Transport should follow the shape of the traffic rather than be
+uniform for tidiness.
 
-That last row is the case worth designing for. A watcher that is simply absent is free; one that
-accepts the connection and then hangs — a garbage-collecting JVM, an unreachable host in
-`WORKSPACE_WATCHER_URL` — would otherwise charge its timeout to *every* tool call. After one
-failure the script goes quiet for a minute. Losing a minute of hook events costs nothing, because
-the transcript tail is the authoritative record and catches up on its own.
+Speed is not the decisive argument anyway. A spooled event **survives the watcher being down** — it
+waits on disk and is picked up whenever the watcher next starts. Sent over the network, that same
+event is simply lost. For a tool whose entire purpose is not missing things, that settles it.
 
-The request body is streamed into `curl` on stdin rather than passed as an argument. Hook payloads
-carry `tool_response`, which for a large file read easily exceeds `ARG_MAX` (1 MB on macOS); as an
-argument that fails with *argument list too long* and the event vanishes silently, which is the
-worst failure mode an observability tool can have.
+The script writes to a temporary name and renames into place. Rename is atomic within a filesystem,
+so the watcher can never read a half-written payload — no locking, no partial JSON. Spooled files
+older than an hour are discarded rather than replayed, so a watcher that was off for a week does
+not dump a week of history into the feed on startup.
+
+Set `WORKSPACE_WATCHER_URL` to post the `recordAgentEvent` mutation instead. That covers the one
+case a spool cannot: a watcher running on a *different host* than the agent. On that path the script
+streams the body into `curl` on stdin rather than passing it as an argument — hook payloads carry
+`tool_response`, which for a large file read exceeds `ARG_MAX` (1 MB on macOS), and as an argument
+that fails with *argument list too long* and the event vanishes silently. One failure also trips a
+60-second circuit breaker, so a watcher that accepts connections and then stalls cannot charge its
+timeout to every subsequent tool call.
+
+Either way the script always exits 0 and discards all output. A hook blocks the agent until it
+returns, and an observer must never be able to block or alter the agent it is watching.
 
 ## Configuration
 
@@ -138,6 +150,8 @@ Any property can be passed as `--watcher.foo=bar` or set in `application.yml`.
 | `watcher.claude-home` | `~/.claude` | where transcripts live |
 | `watcher.fs-poll-ms` | `750` | workspace rescan interval |
 | `watcher.transcript-poll-ms` | `500` | transcript tail interval |
+| `watcher.spool` | `~/.claude/workspace-watcher-spool` | where hooks drop payloads |
+| `watcher.spool-poll-ms` | `200` | spool drain interval |
 | `watcher.process-poll-ms` | `2000` | process sampling interval; `0` disables it |
 | `watcher.history-size` | `2000` | events replayed to a newly opened dashboard |
 | `watcher.ignore-dirs` | `.git`, `node_modules`, `target`, … | never descended into |
@@ -174,7 +188,7 @@ Stated plainly, because a monitoring tool that overstates its coverage is worse 
 ```
 be.kleisli.ww
 ├── core     WatchEvent, EventBus (ring buffer + fan-out), WatcherProperties, Shell
-├── claude   TranscriptTailService (layer 1a), HookController (layer 1b)
+├── claude   TranscriptTailService (layer 1a), HookSpoolService + HookEvents (layer 1b)
 ├── fs       WorkspaceScanService (layer 2)
 ├── git      GitService — shells out to git rather than embedding JGit
 ├── proc     ProcessTreeService — lsof + ProcessHandle

@@ -31,6 +31,15 @@ public class WatcherProperties {
     /** How often the transcript files are polled for appended lines. */
     private long transcriptPollMs = 500;
 
+    /**
+     * Directory hooks spool their payloads into. Must match WORKSPACE_WATCHER_SPOOL in the hook
+     * script. Kept outside the workspace so spooled events never show up as file activity.
+     */
+    private String spool = System.getProperty("user.home") + "/.claude/workspace-watcher-spool";
+
+    /** How often the spool directory is drained. Cheap: the directory is normally empty. */
+    private long spoolPollMs = 200;
+
     /** How often the process tree is rebuilt. Set to 0 to disable process polling. */
     private long processPollMs = 2000;
 
@@ -39,6 +48,10 @@ public class WatcherProperties {
 
     public Path workspacePath() {
         return Paths.get(workspace).toAbsolutePath().normalize();
+    }
+
+    public Path spoolPath() {
+        return Paths.get(spool).toAbsolutePath().normalize();
     }
 
     public Path claudeProjectsPath() {
@@ -57,6 +70,10 @@ public class WatcherProperties {
     public void setMaxDiffBytes(long maxDiffBytes) { this.maxDiffBytes = maxDiffBytes; }
     public long getTranscriptPollMs() { return transcriptPollMs; }
     public void setTranscriptPollMs(long transcriptPollMs) { this.transcriptPollMs = transcriptPollMs; }
+    public String getSpool() { return spool; }
+    public void setSpool(String spool) { this.spool = spool; }
+    public long getSpoolPollMs() { return spoolPollMs; }
+    public void setSpoolPollMs(long spoolPollMs) { this.spoolPollMs = spoolPollMs; }
     public long getProcessPollMs() { return processPollMs; }
     public void setProcessPollMs(long processPollMs) { this.processPollMs = processPollMs; }
     public int getHistorySize() { return historySize; }

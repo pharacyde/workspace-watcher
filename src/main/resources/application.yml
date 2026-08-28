@@ -27,6 +27,9 @@ watcher:
   claude-home: ${user.home}/.claude
   fs-poll-ms: 750
   transcript-poll-ms: 500
+  # Hooks spool here; must match WORKSPACE_WATCHER_SPOOL in hooks/workspace-watcher-hook.sh
+  spool: ${user.home}/.claude/workspace-watcher-spool
+  spool-poll-ms: 200
   process-poll-ms: 2000
   history-size: 2000
 

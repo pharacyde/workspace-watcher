@@ -45,7 +45,8 @@ These are the decisions the project exists to hold. Do not quietly relax them.
 ```
 be.kleisli.ww
 ├── core     WatchEvent, EventBus, WatcherProperties, Shell
-├── claude   TranscriptTailService (tails ~/.claude/projects/**/*.jsonl), HookController
+├── claude   TranscriptTailService (tails ~/.claude/projects/**/*.jsonl),
+│            HookSpoolService (drains the spool dir), HookEvents (shared parsing)
 ├── fs       WorkspaceScanService (mtime+size snapshot poller)
 ├── git      GitService (shells out to git; no JGit)
 ├── proc     ProcessTreeService (lsof -a -d cwd + ProcessHandle)
@@ -65,8 +66,15 @@ no CDN, works offline.
 - **Partial lines.** The tail only consumes up to the last newline in the chunk it read, and advances
   the byte offset by exactly that much — otherwise a half-flushed line corrupts UTF-8 decoding.
 - **The hook script must stay fast and silent.** It runs on every tool call and blocks the agent
-  until it returns. Three properties are load-bearing, all three verified by measurement: the body
-  is streamed on stdin (payloads exceed `ARG_MAX`), `--max-time` is tight, and one failure trips a
+  until it returns. Default path is a spool file: ~5 ms, no dependencies, and the event survives the
+  watcher being down. Do not "simplify" this to a network call — that trade was measured and lost.
+- **Do not move hooks onto the WebSocket.** It looks tidier and is strictly worse: a hook is a fresh
+  process per tool call, so a persistent connection has nothing to amortise and pays its handshake
+  every time. Measured at 50 ms plus a node dependency, against 5 ms for a file.
+- **Spool writes must stay atomic.** Write to a temp name, then rename. A reader must never see a
+  half-written payload.
+- **The `WORKSPACE_WATCHER_URL` path is for a remote watcher only.** There the body is streamed into
+  curl on stdin (payloads exceed `ARG_MAX`), `--max-time` is tight, and one failure trips a
   60-second circuit breaker so a stalled watcher cannot tax every subsequent call.
 - **`lsof +D` is a trap.** It walks the entire tree on every call. `lsof -a -d cwd -F pn` returns all
   processes' working directories in one cheap call; filter in Java.
