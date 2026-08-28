@@ -167,6 +167,11 @@ own `~/.claude`.
   workspace", which orders by id; the (workspace, ts) index cannot serve that ordering. Measured
   over 500k rows: 328ms without it, 1ms with. It costs about 18% of write throughput and 28% of
   disk, which is a trade worth making twice.
+- **The schema lives in `db/schema.sql`**, applied by Spring's `ScriptUtils` on every start. Every
+  statement is idempotent. Do not move DDL back into Java strings.
+- **Timeline series must be dense arrays.** Filling only the buckets the server returned leaves
+  holes, a hole spreads into `Math.max` as `undefined`, the peak becomes `NaN`, and `NaN > 0` is
+  false — so the chart renders empty while the data is all there.
 - **The timeline counts in SQL, never in the client.** `activity()` returns a few hundred numbers
   for what may be millions of rows. Do not "simplify" it into fetching events and counting them.
 - **The timeline draws two densities.** File events dwarf agent events by orders of magnitude, so a

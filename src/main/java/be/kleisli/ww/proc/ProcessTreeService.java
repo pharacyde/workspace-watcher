@@ -4,6 +4,7 @@ import be.kleisli.ww.core.ActiveWorkspace;
 import be.kleisli.ww.core.Shell;
 import be.kleisli.ww.core.StateStream;
 import be.kleisli.ww.core.WatcherProperties;
+import be.kleisli.ww.store.EventStore;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -11,6 +12,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -36,12 +39,14 @@ public class ProcessTreeService {
 
   private final WatcherProperties props;
   private final ActiveWorkspace active;
+  private final EventStore store;
   private final StateStream<Snapshot> stream = new StateStream<>();
   private volatile List<Node> lastTree = List.of();
 
-  public ProcessTreeService(WatcherProperties props, ActiveWorkspace active) {
+  public ProcessTreeService(WatcherProperties props, ActiveWorkspace active, EventStore store) {
     this.props = props;
     this.active = active;
+    this.store = store;
     stream.publish(new Snapshot(Instant.now().toString(), 0, List.of()));
   }
 
@@ -66,6 +71,7 @@ public class ProcessTreeService {
     }
     lastTree = tree;
     stream.publish(new Snapshot(Instant.now().toString(), count(tree), tree));
+    sampleResources(inWorkspace.keySet(), workspace);
   }
 
   /** One {@code lsof} call for all processes, filtered to the workspace subtree. */
@@ -126,6 +132,38 @@ public class ProcessTreeService {
       }
     }
     return roots;
+  }
+
+  /**
+   * Total CPU and memory of everything working in this workspace.
+   *
+   * <p>One {@code ps} call for the whole set. Per-process GPU and Neural Engine figures are not
+   * here because they are not obtainable: {@code powermetrics} refuses to run without root, and
+   * even with it reports system-wide numbers rather than per-process ones.
+   */
+  private void sampleResources(Set<Long> pids, Path workspace) {
+    if (pids.isEmpty()) {
+      store.recordResources(workspace.toString(), 0, 0);
+      return;
+    }
+    List<String> command = new ArrayList<>(List.of("ps", "-o", "%cpu=,rss=", "-p"));
+    command.add(pids.stream().map(String::valueOf).collect(Collectors.joining(",")));
+
+    double cpu = 0;
+    long rssKb = 0;
+    for (String line : Shell.run(null, command, 10).lines()) {
+      String[] fields = line.trim().split("\\s+");
+      if (fields.length < 2) {
+        continue;
+      }
+      try {
+        cpu += Double.parseDouble(fields[0]);
+        rssKb += Long.parseLong(fields[1]);
+      } catch (NumberFormatException e) {
+        // A row that vanished between lsof and ps is not worth a log line.
+      }
+    }
+    store.recordResources(workspace.toString(), cpu, rssKb);
   }
 
   private static int count(List<Node> nodes) {

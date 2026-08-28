@@ -160,6 +160,22 @@ type SessionEntry {
   live: Boolean!
 }
 
+"""
+CPU and memory of everything working in this workspace, in one slice of a timeline.
+
+Averaged over the slice rather than summed, because a rate does not add up over a window.
+
+There is no GPU or Neural Engine here because those figures are not obtainable: powermetrics
+refuses to run without root, and even with it reports system-wide numbers rather than per-process.
+"""
+type ResourceBucket {
+  index: Int!
+  from: String!
+  "Percent, summed across the workspace's processes - so it can exceed 100 on several cores."
+  cpu: Float!
+  memoryMb: Float!
+}
+
 "Tokens in one slice of a timeline, split the way the cost is."
 type TokenBucket {
   index: Int!
@@ -273,6 +289,9 @@ type Query {
   in a count of events and nothing alike in what they cost.
   """
   tokenActivity(since: String!, until: String!, buckets: Int = 240): [TokenBucket!]!
+
+  "CPU and memory over a range, bucketed for a timeline."
+  resourceActivity(since: String!, until: String!, buckets: Int = 240): [ResourceBucket!]!
 
   """
   Tokens and cost for one session, or for the whole workspace when sessionId is omitted.

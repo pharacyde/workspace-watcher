@@ -1,20 +1,63 @@
-import { css, html, LitElement } from 'lit';
+import { css, html, LitElement, svg } from 'lit';
 import { request } from '../api/client';
-import { ActivityDocument, TokenActivityDocument } from '../api/documents';
+import {
+  ActivityDocument,
+  ResourceActivityDocument,
+  TokenActivityDocument,
+} from '../api/documents';
 
-type Bucket = { index: number; from: string; count: number; agentCount: number };
+type SeriesId = 'events' | 'tokens' | 'cpu' | 'memory';
+
+type Series = {
+  id: SeriesId;
+  label: string;
+  colour: string;
+  hint: string;
+  format: (value: number) => string;
+};
+
+const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 
 /**
- * Which series the timeline draws.
+ * The series the timeline can draw, each independently switchable.
  *
- * <p>Two questions that look alike and are not: a hundred file events and one enormous prompt are
- * indistinguishable in a count of events, and nothing alike in what they cost.
+ * <p>They are overlaid rather than chosen between, because the interesting thing is usually how two
+ * of them line up: a spike in tokens against a flat CPU line says something different from both
+ * rising together.
+ *
+ * <p>No GPU or Neural Engine, and not for want of trying: {@code powermetrics} refuses to run
+ * without root, and even with it reports system-wide figures rather than per-process ones.
  */
-type Metric = 'events' | 'tokens';
-
-const METRICS: { id: Metric; label: string; hint: string }[] = [
-  { id: 'events', label: 'events', hint: 'All events, with the share an agent caused drawn on top' },
-  { id: 'tokens', label: 'tokens', hint: 'Tokens consumed, with output tokens drawn on top' },
+const SERIES: Series[] = [
+  {
+    id: 'events',
+    label: 'events',
+    colour: '#7b8494',
+    hint: 'Everything the watcher recorded, agent actions and file changes alike',
+    format: (v) => compact.format(v),
+  },
+  {
+    id: 'tokens',
+    label: 'tokens',
+    colour: '#7aa2f7',
+    hint: 'Tokens consumed. A hundred file events and one enormous prompt look alike in a count of events and nothing alike here',
+    format: (v) => compact.format(v),
+  },
+  {
+    id: 'cpu',
+    label: 'cpu',
+    colour: '#e5c07b',
+    hint: 'CPU percent summed across the processes working in this workspace, so it can exceed 100 on several cores',
+    format: (v) => `${v.toFixed(0)}%`,
+  },
+  {
+    id: 'memory',
+    label: 'memory',
+    colour: '#c39bf5',
+    hint: 'Resident memory of those same processes',
+    // Not the compact formatter: it would render 2400 megabytes as "2.4KMB".
+    format: (v) => (v >= 1024 ? `${(v / 1024).toFixed(1)} GB` : `${v.toFixed(0)} MB`),
+  },
 ];
 
 const WINDOWS: { label: string; seconds: number }[] = [
@@ -25,27 +68,20 @@ const WINDOWS: { label: string; seconds: number }[] = [
 ];
 
 const BUCKETS = 240;
+const HEIGHT = 100;
 
-/**
- * Activity over time, and a way to scrub back into it.
- *
- * <p>Two densities are drawn, not one. File events dwarf everything else - a checkout is thousands
- * of them - so drawing only a total would say "something happened here" for every branch switch and
- * nothing about the agent. The agent-caused share is drawn on top in its own colour, and the height
- * is scaled to whichever is larger, so ten tool calls stay visible next to a thousand file writes.
- */
 export class Timeline extends LitElement {
   static properties = {
     windowSeconds: { state: true },
-    buckets: { state: true },
+    data: { state: true },
+    enabled: { state: true },
     selected: { state: true },
-    metric: { state: true },
   };
 
   declare private windowSeconds: number;
-  declare private buckets: Bucket[];
+  declare private data: Record<SeriesId, number[]>;
+  declare private enabled: Set<SeriesId>;
   declare private selected: number | null;
-  declare private metric: Metric;
 
   private timer?: number;
 
@@ -53,36 +89,18 @@ export class Timeline extends LitElement {
     :host {
       display: flex;
       flex-direction: column;
-      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
       background: var(--panel);
       flex: none;
-      height: 76px;
+      height: 84px;
     }
     header {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       padding: 4px 12px 0;
       font-size: 11px;
       color: var(--dim);
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      font-weight: 600;
-    }
-    .metrics {
-      display: flex;
-      gap: 4px;
-      text-transform: none;
-      letter-spacing: 0;
-      font-weight: 400;
-    }
-    .windows {
-      margin-left: auto;
-      display: flex;
-      gap: 4px;
-      text-transform: none;
-      letter-spacing: 0;
-      font-weight: 400;
     }
     button {
       background: none;
@@ -93,44 +111,54 @@ export class Timeline extends LitElement {
       font-size: 11px;
       padding: 0 6px;
       cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
     }
     button.on {
       color: var(--text);
+    }
+    .swatch {
+      width: 7px;
+      height: 7px;
+      border-radius: 2px;
+      background: currentColor;
+      opacity: 0.35;
+    }
+    button.on .swatch {
+      opacity: 1;
+    }
+    .peak {
+      color: var(--dim);
+    }
+    .windows {
+      margin-left: auto;
+      display: flex;
+      gap: 4px;
+    }
+    button.window.on {
       border-color: var(--accent);
+      color: var(--text);
     }
     button.live {
       color: var(--add);
       border-color: var(--add);
     }
-    .bars {
+    .chart {
       flex: 1;
-      display: flex;
-      align-items: flex-end;
-      gap: 1px;
-      padding: 4px 12px 6px;
       min-height: 0;
+      padding: 2px 12px 6px;
     }
-    .slot {
-      flex: 1;
+    svg {
+      width: 100%;
       height: 100%;
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
-      cursor: pointer;
-      min-width: 0;
+      display: block;
+      overflow: visible;
+      cursor: crosshair;
     }
-    .slot:hover .total {
-      background: var(--dim);
-    }
-    .slot.selected .total,
-    .slot.selected .agent {
-      outline: 1px solid var(--text);
-    }
-    .total {
-      background: var(--line);
-    }
-    .agent {
-      background: var(--accent);
+    .cursor {
+      stroke: var(--text);
+      stroke-width: 0.5;
     }
     .empty {
       color: var(--dim);
@@ -143,9 +171,9 @@ export class Timeline extends LitElement {
   constructor() {
     super();
     this.windowSeconds = 3600;
-    this.buckets = [];
+    this.data = { events: [], tokens: [], cpu: [], memory: [] };
+    this.enabled = new Set<SeriesId>(['events', 'tokens']);
     this.selected = null;
-    this.metric = 'events';
   }
 
   connectedCallback(): void {
@@ -159,42 +187,113 @@ export class Timeline extends LitElement {
     if (this.timer) clearInterval(this.timer);
   }
 
-  private async refresh() {
-    const until = new Date();
-    const since = new Date(until.getTime() - this.windowSeconds * 1000);
-    const range = { since: since.toISOString(), until: until.toISOString(), buckets: BUCKETS };
-    try {
-      if (this.metric === 'tokens') {
-        const { tokenActivity } = await request(TokenActivityDocument, range);
-        // Mapped onto the same shape so one renderer draws both: a total, and a highlighted share
-        // of it. For events that share is what an agent caused; for tokens it is output, which is
-        // the expensive half.
-        this.buckets = tokenActivity.map((b) => ({
-          index: b.index,
-          from: b.from,
-          count: b.total,
-          agentCount: b.output,
-        }));
-      } else {
-        const { activity } = await request(ActivityDocument, range);
-        this.buckets = activity as Bucket[];
-      }
-    } catch {
-      this.buckets = [];
-    }
-  }
-
   private get bucketSeconds() {
     return Math.max(1, Math.floor(this.windowSeconds / BUCKETS));
   }
 
-  private select(bucket: Bucket) {
-    this.selected = bucket.index;
-    const from = new Date(bucket.from);
-    const to = new Date(from.getTime() + this.bucketSeconds * 1000);
+  private async refresh() {
+    const until = new Date();
+    const since = new Date(until.getTime() - this.windowSeconds * 1000);
+    const range = { since: since.toISOString(), until: until.toISOString(), buckets: BUCKETS };
+    // Dense from the start. Assigning only the buckets that came back leaves holes, and a hole
+    // spreads into Math.max as undefined, which makes the peak NaN - and NaN > 0 is false, so the
+    // whole chart silently rendered as empty while the data was there all along.
+    const zeroes = () => new Array<number>(BUCKETS).fill(0);
+    const next: Record<SeriesId, number[]> = {
+      events: zeroes(),
+      tokens: zeroes(),
+      cpu: zeroes(),
+      memory: zeroes(),
+    };
+
+    // Only what is switched on is fetched: an unused series costs nothing.
+    const wanted = this.enabled;
+    const jobs: Promise<void>[] = [];
+
+    if (wanted.has('events')) {
+      jobs.push(
+        request(ActivityDocument, range).then(({ activity }) => {
+          for (const b of activity) next.events[b.index] = b.count;
+        }),
+      );
+    }
+    if (wanted.has('tokens')) {
+      jobs.push(
+        request(TokenActivityDocument, range).then(({ tokenActivity }) => {
+          for (const b of tokenActivity) next.tokens[b.index] = b.total;
+        }),
+      );
+    }
+    if (wanted.has('cpu') || wanted.has('memory')) {
+      jobs.push(
+        request(ResourceActivityDocument, range).then(({ resourceActivity }) => {
+          for (const b of resourceActivity) {
+            next.cpu[b.index] = b.cpu;
+            next.memory[b.index] = b.memoryMb;
+          }
+        }),
+      );
+    }
+
+    try {
+      await Promise.all(jobs);
+      this.data = next;
+    } catch {
+      // A failed refresh keeps the previous picture rather than blanking it.
+    }
+  }
+
+  private toggle(id: SeriesId) {
+    const next = new Set(this.enabled);
+    next.has(id) ? next.delete(id) : next.add(id);
+    this.enabled = next;
+    this.refresh();
+  }
+
+  private peak(id: SeriesId): number {
+    return Math.max(0, ...this.data[id]);
+  }
+
+  /**
+   * One polyline per series, each scaled to its own peak.
+   *
+   * <p>Their units have nothing in common - a count, a token total, a percentage, megabytes - so a
+   * shared axis would flatten three of them into the floor. Scaling each to itself compares shapes,
+   * which is the question being asked, and the legend carries the peak so the height still means
+   * something.
+   */
+  private line(series: Series) {
+    const values = this.data[series.id];
+    const peak = this.peak(series.id);
+    if (peak === 0) return svg``;
+    const points = Array.from({ length: BUCKETS }, (_, i) => {
+      const x = (i / (BUCKETS - 1)) * 100;
+      const y = HEIGHT - ((values[i] ?? 0) / peak) * HEIGHT;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    }).join(' ');
+    return svg`<polyline
+      points=${points}
+      fill="none"
+      stroke=${series.colour}
+      stroke-width="1"
+      vector-effect="non-scaling-stroke"
+    />`;
+  }
+
+  private pick(event: MouseEvent) {
+    const box = (event.currentTarget as SVGElement).getBoundingClientRect();
+    const index = Math.min(
+      BUCKETS - 1,
+      Math.max(0, Math.floor(((event.clientX - box.left) / box.width) * BUCKETS)),
+    );
+    this.selected = index;
+    const from = new Date(Date.now() - this.windowSeconds * 1000 + index * this.bucketSeconds * 1000);
     this.dispatchEvent(
       new CustomEvent('replay-range', {
-        detail: { since: from.toISOString(), until: to.toISOString() },
+        detail: {
+          since: from.toISOString(),
+          until: new Date(from.getTime() + this.bucketSeconds * 1000).toISOString(),
+        },
         bubbles: true,
         composed: true,
       }),
@@ -203,33 +302,31 @@ export class Timeline extends LitElement {
 
   private goLive() {
     this.selected = null;
-    this.dispatchEvent(new CustomEvent('replay-range', { detail: null, bubbles: true, composed: true }));
+    this.dispatchEvent(
+      new CustomEvent('replay-range', { detail: null, bubbles: true, composed: true }),
+    );
   }
 
   render() {
-    const peak = Math.max(1, ...this.buckets.map((b) => b.count));
-    const byIndex = new Map(this.buckets.map((b) => [b.index, b]));
-    const start = Date.now() - this.windowSeconds * 1000;
+    const anything = SERIES.some((s) => this.enabled.has(s.id) && this.peak(s.id) > 0);
 
     return html`
       <header>
-        <span class="metrics">
-          ${METRICS.map(
-            (m) => html`
-              <button
-                class=${this.metric === m.id ? 'on' : ''}
-                title=${m.hint}
-                @click=${() => {
-                  this.metric = m.id;
-                  this.buckets = [];
-                  this.refresh();
-                }}
-              >
-                ${m.label}
-              </button>
-            `,
-          )}
-        </span>
+        ${SERIES.map(
+          (s) => html`
+            <button
+              class=${this.enabled.has(s.id) ? 'on' : ''}
+              style="color:${this.enabled.has(s.id) ? s.colour : 'var(--dim)'}"
+              title=${s.hint}
+              @click=${() => this.toggle(s.id)}
+            >
+              <span class="swatch"></span>${s.label}
+              ${this.enabled.has(s.id) && this.peak(s.id) > 0
+                ? html`<span class="peak">${s.format(this.peak(s.id))}</span>`
+                : ''}
+            </button>
+          `,
+        )}
         ${this.selected !== null
           ? html`<button class="live" @click=${this.goLive}>● back to live</button>`
           : ''}
@@ -237,7 +334,7 @@ export class Timeline extends LitElement {
           ${WINDOWS.map(
             (w) => html`
               <button
-                class=${this.windowSeconds === w.seconds ? 'on' : ''}
+                class="window ${this.windowSeconds === w.seconds ? 'on' : ''}"
                 @click=${() => {
                   this.windowSeconds = w.seconds;
                   this.selected = null;
@@ -250,34 +347,21 @@ export class Timeline extends LitElement {
           )}
         </span>
       </header>
-      ${this.buckets.length === 0
-        ? html`<p class="empty">no recorded ${this.metric} in this window</p>`
-        : html`
-            <div class="bars">
-              ${Array.from({ length: BUCKETS }, (_, index) => {
-                const bucket =
-                  byIndex.get(index) ??
-                  ({
-                    index,
-                    from: new Date(start + index * this.bucketSeconds * 1000).toISOString(),
-                    count: 0,
-                    agentCount: 0,
-                  } satisfies Bucket);
-                const total = Math.round((bucket.count / peak) * 100);
-                const agent = Math.round((bucket.agentCount / peak) * 100);
-                return html`
-                  <div
-                    class="slot ${this.selected === index ? 'selected' : ''}"
-                    title="${new Date(bucket.from).toLocaleTimeString('en-GB', { hour12: false })} — ${this.metric === 'tokens' ? `${bucket.count.toLocaleString()} tokens, ${bucket.agentCount.toLocaleString()} output` : `${bucket.count} events, ${bucket.agentCount} by an agent`}"
-                    @click=${() => this.select(bucket)}
-                  >
-                    <div class="total" style="height:${Math.max(total - agent, bucket.count ? 1 : 0)}%"></div>
-                    <div class="agent" style="height:${agent}%"></div>
-                  </div>
-                `;
-              })}
-            </div>
-          `}
+      <div class="chart">
+        ${anything
+          ? html`
+              <svg viewBox="0 0 100 ${HEIGHT}" preserveAspectRatio="none" @click=${this.pick}>
+                ${SERIES.filter((s) => this.enabled.has(s.id)).map((s) => this.line(s))}
+                ${this.selected !== null
+                  ? svg`<line class="cursor"
+                      x1=${(this.selected / (BUCKETS - 1)) * 100}
+                      x2=${(this.selected / (BUCKETS - 1)) * 100}
+                      y1="0" y2=${HEIGHT} vector-effect="non-scaling-stroke" />`
+                  : ''}
+              </svg>
+            `
+          : html`<p class="empty">nothing recorded in this window</p>`}
+      </div>
     `;
   }
 }

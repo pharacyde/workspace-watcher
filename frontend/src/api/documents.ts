@@ -182,6 +182,17 @@ export const TokenActivityDocument = graphql(`
   }
 `);
 
+export const ResourceActivityDocument = graphql(`
+  query ResourceActivity($since: String!, $until: String!, $buckets: Int!) {
+    resourceActivity(since: $since, until: $until, buckets: $buckets) {
+      index
+      from
+      cpu
+      memoryMb
+    }
+  }
+`);
+
 export const HistoryDocument = graphql(`
   query History($since: String!, $until: String!, $limit: Int!) {
     history(since: $since, until: $until, limit: $limit) {

@@ -14,7 +14,6 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
@@ -25,6 +24,8 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -94,32 +95,10 @@ public class EventStore {
       Path file = Path.of(location).toAbsolutePath().normalize();
       Files.createDirectories(file.getParent());
       connection = DriverManager.getConnection("jdbc:sqlite:" + file);
-      try (Statement statement = connection.createStatement()) {
-        // WAL so a long read cannot block the writer, and vice versa.
-        statement.execute("PRAGMA journal_mode=WAL");
-        statement.execute("PRAGMA auto_vacuum=INCREMENTAL");
-        statement.execute("PRAGMA synchronous=NORMAL");
-        statement.execute(
-            """
-            CREATE TABLE IF NOT EXISTS event (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              seq TEXT NOT NULL,
-              ts TEXT NOT NULL,
-              source TEXT NOT NULL,
-              type TEXT NOT NULL,
-              summary TEXT,
-              path TEXT,
-              agent TEXT,
-              session_id TEXT,
-              detail TEXT,
-              workspace TEXT NOT NULL)\
-            """);
-        statement.execute("CREATE INDEX IF NOT EXISTS event_workspace_ts ON event (workspace, ts)");
-        // The common query is "the most recent N for this workspace", which orders by id. The
-        // (workspace, ts) index cannot serve that ordering, so without this one SQLite filtered
-        // by workspace and then sorted the whole partition.
-        statement.execute("CREATE INDEX IF NOT EXISTS event_workspace_id ON event (workspace, id)");
-      }
+      // Spring's script runner rather than a wall of statement.execute calls: the schema lives
+      // in db/schema.sql, where it is SQL rather than strings, and every statement in it is
+      // idempotent so this is safe on every start.
+      ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/schema.sql"));
       connection.setAutoCommit(false);
       log.info("recording history to {}", file);
     } catch (IOException | SQLException e) {
@@ -263,6 +242,89 @@ public class EventStore {
     return rows.reversed();
   }
 
+  /** One resource sample: CPU percent across the workspace's processes, and their total RSS. */
+  public record ResourceBucket(int index, String from, double cpu, double memoryMb) {}
+
+  /**
+   * Records one resource sample.
+   *
+   * <p>Written straight through rather than queued: it happens once every couple of seconds, not
+   * thousands of times a second like events, so the batching that protects the collectors would
+   * only add latency to something that has none.
+   */
+  public void recordResources(String workspace, double cpu, long rssKb) {
+    if (connection == null) {
+      return;
+    }
+    try (PreparedStatement statement =
+        connection.prepareStatement(
+            "INSERT INTO metric (ts, workspace, cpu, rss_kb) VALUES (?, ?, ?, ?)")) {
+      statement.setString(1, Instant.now().toString());
+      statement.setString(2, workspace);
+      statement.setDouble(3, cpu);
+      statement.setLong(4, rssKb);
+      statement.executeUpdate();
+      connection.commit();
+    } catch (SQLException e) {
+      log.debug("cannot record resources: {}", e.toString());
+    }
+  }
+
+  /** Averaged per slice rather than summed: a rate does not add up over a window. */
+  public List<ResourceBucket> resourceActivity(String since, String until, int buckets) {
+    if (connection == null) {
+      return List.of();
+    }
+    Path workspace = active.get();
+    if (workspace == null) {
+      return List.of();
+    }
+    long from;
+    long to;
+    try {
+      from = Instant.parse(since).getEpochSecond();
+      to = Instant.parse(until).getEpochSecond();
+    } catch (DateTimeParseException e) {
+      return List.of();
+    }
+    int slices = Math.clamp(buckets, 1, 2000);
+    long width = Math.max(1, (to - from) / slices);
+
+    String sql =
+        """
+        SELECT CAST((strftime('%s', ts) - ?) / ? AS INTEGER) AS bucket,
+               AVG(cpu), AVG(rss_kb)
+        FROM metric
+        WHERE workspace = ? AND ts >= ? AND ts < ?
+        GROUP BY bucket
+        ORDER BY bucket\
+        """;
+
+    List<ResourceBucket> result = new ArrayList<>();
+    try (PreparedStatement statement = connection.prepareStatement(sql)) {
+      statement.setLong(1, from);
+      statement.setLong(2, width);
+      statement.setString(3, workspace.toString());
+      statement.setString(4, since);
+      statement.setString(5, until);
+      try (ResultSet rs = statement.executeQuery()) {
+        while (rs.next()) {
+          int index = rs.getInt(1);
+          result.add(
+              new ResourceBucket(
+                  index,
+                  Instant.ofEpochSecond(from + (long) index * width).toString(),
+                  rs.getDouble(2),
+                  rs.getDouble(3) / 1024d));
+        }
+      }
+    } catch (SQLException e) {
+      log.warn("cannot read resources: {}", e.toString());
+      return List.of();
+    }
+    return result;
+  }
+
   /** How many events fell in one slice of a timeline, and how many of those an agent caused. */
   public record Bucket(int index, String from, int count, int agentCount) {}
 
@@ -363,12 +425,17 @@ public class EventStore {
         statement.setInt(1, props.getMaxStoredEvents());
         removed += statement.executeUpdate();
       }
+      try (PreparedStatement statement =
+          connection.prepareStatement("DELETE FROM metric WHERE ts < ?")) {
+        statement.setString(1, cutoff);
+        removed += statement.executeUpdate();
+      }
       connection.commit();
       if (removed > 0) {
         log.info("pruned {} event(s)", removed);
-        try (Statement statement = connection.createStatement()) {
+        try (PreparedStatement vacuum = connection.prepareStatement("PRAGMA incremental_vacuum")) {
           // Without this the file keeps the space it no longer needs.
-          statement.execute("PRAGMA incremental_vacuum");
+          vacuum.execute();
         }
       }
     } catch (SQLException e) {

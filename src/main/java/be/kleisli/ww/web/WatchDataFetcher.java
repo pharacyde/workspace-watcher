@@ -159,6 +159,14 @@ public class WatchDataFetcher {
     return mapper.toTokenActivity(usage.activity(since, until, buckets == null ? 240 : buckets));
   }
 
+  /** CPU and memory over a range, bucketed for a timeline. */
+  @DgsQuery
+  public List<be.kleisli.ww.generated.types.ResourceBucket> resourceActivity(
+      @InputArgument String since, @InputArgument String until, @InputArgument Integer buckets) {
+    return mapper.toResourceActivity(
+        store.resourceActivity(since, until, buckets == null ? 240 : buckets));
+  }
+
   /** Guard rules, and whether they are enforced or only observed. */
   @DgsQuery
   public GuardConfig guard() {

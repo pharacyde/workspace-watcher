@@ -131,6 +131,20 @@ public class ApiMapper {
         .toList();
   }
 
+  public List<be.kleisli.ww.generated.types.ResourceBucket> toResourceActivity(
+      List<EventStore.ResourceBucket> buckets) {
+    return buckets.stream()
+        .map(
+            bucket ->
+                be.kleisli.ww.generated.types.ResourceBucket.newBuilder()
+                    .index(bucket.index())
+                    .from(bucket.from())
+                    .cpu(bucket.cpu())
+                    .memoryMb(bucket.memoryMb())
+                    .build())
+        .toList();
+  }
+
   public List<ActivityBucket> toActivity(List<EventStore.Bucket> buckets) {
     return buckets.stream()
         .map(

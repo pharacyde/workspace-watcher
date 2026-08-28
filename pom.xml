@@ -75,6 +75,11 @@
       One append-only table with a range query over it. Plain JDBC rather than JPA: there is no
       object graph here, and an ORM would be more machinery than the thing it manages.
     -->
+    <!-- For ScriptUtils, which applies db/schema.sql. -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-jdbc</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.xerial</groupId>
       <artifactId>sqlite-jdbc</artifactId>

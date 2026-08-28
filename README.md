@@ -79,7 +79,16 @@ the result into the jar. Use `-DskipFrontend` to build the backend alone.
 Open <http://127.0.0.1:8080>. Then, in your own terminal, `cd` to a project and start Claude Code as
 you normally would.
 
-A timeline runs directly under the header. Pick what it draws: **events** or **tokens**. They look
+A timeline runs directly under the header. Four series, each switched on or off independently: **events**, **tokens**, **cpu**, **memory**.
+They overlay rather than replace one another, because the interesting thing is usually how two of
+them line up — a spike in tokens against a flat CPU line says something different from both rising
+together. Each is scaled to its own peak, which the legend carries, since a count, a token total, a
+percentage and megabytes share no axis worth drawing.
+
+No GPU or Neural Engine, and not for want of trying: `powermetrics` refuses to run without root, and
+even with it reports system-wide figures rather than per-process ones.
+
+Older text, kept for the shape of the argument: They look
 alike and are not — a hundred file events and one enormous prompt are indistinguishable in a count
 of events, and nothing alike in what they cost. Each series draws two densities rather than one: Click a slice to scrub back into it; the activity panel becomes a replay of that moment,
 read from the database rather than the buffer, so it reaches back past what the live stream still

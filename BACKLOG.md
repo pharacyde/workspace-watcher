@@ -30,7 +30,12 @@ Tree that updates in real time as an agent spawns a short-lived subprocess.
 what an agent ran comes from the transcript/hook layer, which logs every command with its exact
 arguments. Keep the sampler for long-running processes; render short-lived ones from agent events.*
 
-**P1-03 Process resource usage (CPU & RAM)** 🟢
+**P1-03 Process resource usage (CPU & RAM)** ✅
+*Sampled with one `ps` call per poll across the processes working in the workspace, stored beside
+the events, and drawn as two more timeline series. GPU and Neural Engine are not included and
+cannot be: `powermetrics` requires root and reports system-wide rather than per-process.*
+
+**P1-03b Original item** 🟢
 CPU and memory per process and per subtree.
 *`ProcessHandle.Info.totalCpuDuration()` gives cumulative CPU time, so a percentage can be derived
 across two samples. RSS is not in the JDK API — read it from `ps -o rss=` in the same poll.*
