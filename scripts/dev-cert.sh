@@ -20,15 +20,22 @@ set -euo pipefail
 KEYSTORE="${WORKSPACE_WATCHER_KEYSTORE:-$HOME/.claude/workspace-watcher/keystore.p12}"
 PASSWORD="${WORKSPACE_WATCHER_KEYSTORE_PASSWORD:-workspace-watcher}"
 HOSTS=(localhost 127.0.0.1 ::1)
+TRUST_PENDING=""
 
 mkdir -p "$(dirname "$KEYSTORE")"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 if command -v mkcert >/dev/null 2>&1; then
-  echo "Using mkcert; the system will trust this certificate."
-  mkcert -install
-  mkcert -cert-file "$WORK/cert.pem" -key-file "$WORK/key.pem" "${HOSTS[@]}"
+  echo "Using mkcert."
+  # Installing the CA needs sudo with a terminal, which a script run from a tool does not have.
+  # Failing that is not a reason to stop: the certificate is still issued from the local CA and
+  # becomes trusted the moment "mkcert -install" is run by hand, because trust attaches to the CA
+  # rather than to this certificate.
+  if ! mkcert -install >/dev/null 2>&1; then
+    TRUST_PENDING=1
+  fi
+  mkcert -cert-file "$WORK/cert.pem" -key-file "$WORK/key.pem" "${HOSTS[@]}" >/dev/null 2>&1
 else
   echo "mkcert not found, falling back to a self-signed certificate."
   echo "Your browser will warn about it, and Safari will still refuse notifications."
@@ -48,4 +55,12 @@ openssl pkcs12 -export \
 chmod 600 "$KEYSTORE"
 echo
 echo "Wrote $KEYSTORE"
+if [ -n "${TRUST_PENDING:-}" ]; then
+  echo
+  echo "The local CA is not trusted yet - that step needs an interactive password:"
+  echo
+  echo "    mkcert -install"
+  echo
+  echo "Until you run it, browsers will warn and Safari will still refuse notifications."
+fi
 echo "Restart the watcher and open https://localhost:8080"
