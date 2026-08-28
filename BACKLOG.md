@@ -88,10 +88,6 @@ without stopping anything, so you see what they catch first. Fails open everywhe
 agent until it answers, which makes this a guardrail against mistakes rather than a boundary
 against an adversary, and the README says so.*
 
-**P4-01 Emergency kill switch** 🟡 unchanged
-*Still deliberately not built. P4-02 shows the shape a control feature has to take here: off by
-default, a separate opt-in, and failing open.*
-
 **P4-03 Multi-workspace support** ✅
 Switch between project folders from a dropdown.
 *Done, and better than proposed: workspaces are not configured at all. The hook writes a spool
@@ -132,9 +128,12 @@ here — source of an event, add/delete in a diff — rather than on surface.*
 *Now genuinely accurate, because read/write counts per file come from the transcript rather than
 from guessing at FS events.*
 
-**P7-02 Cost & token tracker** 🟢
-*Note: no log scraping needed. Token usage is on the assistant messages in the transcript, and
-Claude Code also exports OpenTelemetry metrics natively.*
+**P7-02 Cost & token tracker** ✅
+*Read from the transcripts, so a figure is a session's whole total rather than only what happened
+since the watcher started. Counted per token kind, which turned out to matter more than expected:
+on this project cache reads were 71% of the bill, so counting only input and output would have
+understated it fivefold. Rates live in an editable `pricing.json`; an unpriced model is reported as
+unpriced rather than free.*
 
 **P7-03 Execution timeline / session replay** ✅
 *A timeline along the bottom over a selectable window, with a slice you can click to replay that

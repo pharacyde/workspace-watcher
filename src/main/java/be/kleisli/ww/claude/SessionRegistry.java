@@ -1,6 +1,7 @@
 package be.kleisli.ww.claude;
 
 import be.kleisli.ww.core.StateStream;
+import be.kleisli.ww.core.WatcherProperties;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -42,6 +43,7 @@ public class SessionRegistry {
   private static final String TITLE_MARKER = "\"ai-title\"";
 
   private final TranscriptLocator locator;
+  private final WatcherProperties props;
   private final ObjectMapper mapper;
   private final StateStream<List<Entry>> stream = new StateStream<>();
 
@@ -51,8 +53,9 @@ public class SessionRegistry {
   /** Sessions whose transcript has already been searched for a title it wrote before we started. */
   private final KeySetView<String, Boolean> searched = ConcurrentHashMap.newKeySet();
 
-  public SessionRegistry(TranscriptLocator locator, ObjectMapper mapper) {
+  public SessionRegistry(TranscriptLocator locator, WatcherProperties props, ObjectMapper mapper) {
     this.locator = locator;
+    this.props = props;
     this.mapper = mapper;
     stream.publish(List.of());
   }
@@ -107,21 +110,38 @@ public class SessionRegistry {
 
   @Scheduled(fixedDelayString = "${watcher.registry-poll-ms:2000}")
   public void scan() {
-    List<Entry> entries = new ArrayList<>();
     Instant liveSince = Instant.now().minus(LIVE_WINDOW);
+
+    // Sorted and trimmed before any title is read, so the work is bounded by what is shown rather
+    // than by how long the project has existed.
+    record Candidate(String id, Path file, Instant modified) {}
+    List<Candidate> candidates = new ArrayList<>();
     for (Path transcript : locator.transcripts()) {
       String name = transcript.getFileName().toString();
-      String id = name.substring(0, name.length() - ".jsonl".length());
       try {
-        Instant modified = Files.getLastModifiedTime(transcript).toInstant();
-        entries.add(
-            new Entry(
-                id, titleFor(id, transcript), modified.toString(), modified.isAfter(liveSince)));
+        candidates.add(
+            new Candidate(
+                name.substring(0, name.length() - ".jsonl".length()),
+                transcript,
+                Files.getLastModifiedTime(transcript).toInstant()));
       } catch (IOException e) {
         // A session that vanished between listing and reading simply is not there.
       }
     }
-    entries.sort(Comparator.comparing(Entry::lastActivity).reversed());
+    candidates.sort(Comparator.comparing(Candidate::modified).reversed());
+
+    List<Entry> entries =
+        candidates.stream()
+            .limit(props.getMaxSessions())
+            .map(
+                c ->
+                    new Entry(
+                        c.id(),
+                        titleFor(c.id(), c.file()),
+                        c.modified().toString(),
+                        c.modified().isAfter(liveSince)))
+            .toList();
+
     if (!entries.equals(stream.current())) {
       stream.publish(entries);
     }

@@ -127,6 +127,29 @@ export const ProcessTreeDocument = graphql(`
   }
 `);
 
+export const UsageDocument = graphql(`
+  query Usage($sessionId: String) {
+    usage(sessionId: $sessionId) {
+      costUsd
+      tokens {
+        input
+        output
+        cacheWrite5m
+        cacheWrite1h
+        cacheRead
+        total
+      }
+      models {
+        model
+        costUsd
+        tokens {
+          total
+        }
+      }
+    }
+  }
+`);
+
 export const ActivityDocument = graphql(`
   query Activity($since: String!, $until: String!, $buckets: Int!) {
     activity(since: $since, until: $until, buckets: $buckets) {

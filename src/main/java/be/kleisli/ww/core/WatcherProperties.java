@@ -56,6 +56,14 @@ public class WatcherProperties {
    */
   private String spool = System.getProperty("user.home") + "/.claude/workspace-watcher-spool";
 
+  /**
+   * How many agent sessions are offered for a workspace.
+   *
+   * <p>A long-running project accumulates hundreds - a real one here has 333 - and a list that long
+   * is not something anyone picks from. The most recent are the ones worth following.
+   */
+  private int maxSessions = 25;
+
   /** How often the register of known workspaces is rescanned. */
   private long registryPollMs = 2000;
 
@@ -172,6 +180,14 @@ public class WatcherProperties {
 
   public void setRetentionDays(int retentionDays) {
     this.retentionDays = retentionDays;
+  }
+
+  public int getMaxSessions() {
+    return maxSessions;
+  }
+
+  public void setMaxSessions(int maxSessions) {
+    this.maxSessions = maxSessions;
   }
 
   public int getMaxStoredEvents() {

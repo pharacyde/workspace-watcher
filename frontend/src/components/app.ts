@@ -12,6 +12,7 @@ import './feed';
 import './git-panel';
 import './process-panel';
 import './timeline';
+import './usage';
 
 export class App extends LitElement {
   static properties = {
@@ -42,6 +43,7 @@ export class App extends LitElement {
       display: flex;
       align-items: baseline;
       gap: 12px;
+      position: relative;
       padding: 9px 16px;
       border-bottom: 1px solid var(--line);
       flex: none;
@@ -178,6 +180,7 @@ export class App extends LitElement {
         <h1>workspace-watcher</h1>
         ${this.workspacePicker()}
         <span class="pill ${this.connection}">${this.connection}</span>
+        <ww-usage></ww-usage>
         ${this.hasTranscripts
           ? ''
           : html`<span

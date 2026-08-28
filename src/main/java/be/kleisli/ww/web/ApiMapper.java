@@ -11,15 +11,18 @@ import be.kleisli.ww.generated.types.GuardConfig;
 import be.kleisli.ww.generated.types.GuardDecision;
 import be.kleisli.ww.generated.types.GuardRule;
 import be.kleisli.ww.generated.types.GuardRuleKind;
+import be.kleisli.ww.generated.types.ModelUsage;
 import be.kleisli.ww.generated.types.ProcessNode;
 import be.kleisli.ww.generated.types.ProcessSnapshot;
 import be.kleisli.ww.generated.types.SessionEntry;
 import be.kleisli.ww.generated.types.Source;
+import be.kleisli.ww.generated.types.UsageSummary;
 import be.kleisli.ww.generated.types.WorkspaceEntry;
 import be.kleisli.ww.git.GitService;
 import be.kleisli.ww.guard.GuardService;
 import be.kleisli.ww.proc.ProcessTreeService;
 import be.kleisli.ww.store.EventStore;
+import be.kleisli.ww.usage.UsageService;
 import java.util.List;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
@@ -124,6 +127,36 @@ public class ApiMapper {
                     .agentCount(bucket.agentCount())
                     .build())
         .toList();
+  }
+
+  public UsageSummary toUsage(UsageService.Summary summary) {
+    return UsageSummary.newBuilder()
+        .models(
+            summary.models().stream()
+                .map(
+                    m ->
+                        ModelUsage.newBuilder()
+                            .model(m.model())
+                            .tokens(toTokens(m.tokens()))
+                            .costUsd(m.costUsd())
+                            .build())
+                .toList())
+        .tokens(toTokens(summary.tokens()))
+        .costUsd(summary.costUsd())
+        .build();
+  }
+
+  private be.kleisli.ww.generated.types.TokenUsage toTokens(be.kleisli.ww.usage.TokenUsage tokens) {
+    // Float rather than Int on the wire: a long session reads hundreds of millions of cached
+    // tokens, and totals across sessions run past what a 32-bit GraphQL Int can hold.
+    return be.kleisli.ww.generated.types.TokenUsage.newBuilder()
+        .input((double) tokens.input())
+        .output((double) tokens.output())
+        .cacheWrite5m((double) tokens.cacheWrite5m())
+        .cacheWrite1h((double) tokens.cacheWrite1h())
+        .cacheRead((double) tokens.cacheRead())
+        .total((double) tokens.total())
+        .build();
   }
 
   public GuardConfig toGuardConfig(GuardService.Config config) {

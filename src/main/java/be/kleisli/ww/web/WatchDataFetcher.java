@@ -15,11 +15,13 @@ import be.kleisli.ww.generated.types.GuardDecision;
 import be.kleisli.ww.generated.types.ProcessSnapshot;
 import be.kleisli.ww.generated.types.SessionEntry;
 import be.kleisli.ww.generated.types.Status;
+import be.kleisli.ww.generated.types.UsageSummary;
 import be.kleisli.ww.generated.types.WorkspaceEntry;
 import be.kleisli.ww.git.GitService;
 import be.kleisli.ww.guard.GuardService;
 import be.kleisli.ww.proc.ProcessTreeService;
 import be.kleisli.ww.store.EventStore;
+import be.kleisli.ww.usage.UsageService;
 import com.netflix.graphql.dgs.DgsComponent;
 import com.netflix.graphql.dgs.DgsMutation;
 import com.netflix.graphql.dgs.DgsQuery;
@@ -52,6 +54,7 @@ public class WatchDataFetcher {
   private final SessionRegistry sessions;
   private final EventStore store;
   private final GuardService guard;
+  private final UsageService usage;
   private final EventBus eventBus;
   private final GitService git;
   private final ProcessTreeService processes;
@@ -66,6 +69,7 @@ public class WatchDataFetcher {
       SessionRegistry sessions,
       EventStore store,
       GuardService guard,
+      UsageService usage,
       EventBus eventBus,
       GitService git,
       ProcessTreeService processes,
@@ -78,6 +82,7 @@ public class WatchDataFetcher {
     this.sessions = sessions;
     this.store = store;
     this.guard = guard;
+    this.usage = usage;
     this.eventBus = eventBus;
     this.git = git;
     this.processes = processes;
@@ -139,6 +144,12 @@ public class WatchDataFetcher {
       @InputArgument Integer buckets) {
     return mapper.toActivity(
         store.activity(workspace, since, until, buckets == null ? 240 : buckets));
+  }
+
+  /** Tokens and cost for one session, or the whole workspace when sessionId is omitted. */
+  @DgsQuery
+  public UsageSummary usage(@InputArgument String sessionId) {
+    return mapper.toUsage(usage.summarise(sessionId));
   }
 
   /** Guard rules, and whether they are enforced or only observed. */

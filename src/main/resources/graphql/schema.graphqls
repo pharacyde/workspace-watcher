@@ -170,6 +170,34 @@ type ActivityBucket {
   agentCount: Int!
 }
 
+"""
+Tokens of each kind, kept apart because they are priced up to twentyfold differently: a cache read
+costs a tenth of an input token, a one-hour cache write twice one. For a long agent session the
+cache lines are most of the bill.
+"""
+type TokenUsage {
+  input: Float!
+  output: Float!
+  cacheWrite5m: Float!
+  cacheWrite1h: Float!
+  cacheRead: Float!
+  total: Float!
+}
+
+type ModelUsage {
+  model: String!
+  tokens: TokenUsage!
+  "Null when this model has no price in pricing.json, rather than a confident zero."
+  costUsd: Float
+}
+
+type UsageSummary {
+  models: [ModelUsage!]!
+  tokens: TokenUsage!
+  "Null when any model involved is unpriced."
+  costUsd: Float
+}
+
 type Status {
   "Null until a workspace has been chosen or discovered."
   workspace: String
@@ -204,6 +232,14 @@ type Query {
     until: String!
     buckets: Int = 240
   ): [ActivityBucket!]!
+
+  """
+  Tokens and cost for one session, or for the whole workspace when sessionId is omitted.
+
+  Read from the transcripts, so it is the session's entire total rather than only what happened
+  since the watcher started.
+  """
+  usage(sessionId: String): UsageSummary!
 
   "Guard rules, and whether they are being enforced or only observed."
   guard: GuardConfig!

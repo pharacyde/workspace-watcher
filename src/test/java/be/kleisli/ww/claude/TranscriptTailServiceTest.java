@@ -46,7 +46,7 @@ class TranscriptTailServiceTest {
         new TranscriptTailService(
             active,
             locator,
-            new SessionRegistry(locator, new ObjectMapper()),
+            new SessionRegistry(locator, props, new ObjectMapper()),
             bus,
             new ObjectMapper());
   }

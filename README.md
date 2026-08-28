@@ -188,6 +188,18 @@ timeout to every subsequent tool call.
 Either way the script always exits 0 and discards all output. A hook blocks the agent until it
 returns, and an observer must never be able to block or alter the agent it is watching.
 
+### What it costs
+
+The header carries what the agents in this workspace have spent. Click it for the breakdown, which
+is per token kind rather than one total — because they are not priced alike, and the difference is
+not small. Measured on this project: 224M cache reads against 1.2M output tokens, and the cache
+reads were **71% of the bill**. A tracker that counted only input and output would have reported a
+fifth of the real figure, confidently.
+
+Rates live in `pricing.json` beside the database, seeded from the bundled table. They are a
+snapshot and they change, so the file is meant to be edited. A model with no entry is reported as
+unpriced rather than free.
+
 ### Git layouts
 
 Branches and linked worktrees work as they are: `git` reports the worktree's own branch and root,
