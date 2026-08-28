@@ -8,9 +8,11 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
@@ -56,6 +58,23 @@ public class UsageService {
       TokenUsage last7d) {}
 
   private record Entry(long epochSecond, String model, TokenUsage tokens) {}
+
+  /**
+   * Counts each assistant message once.
+   *
+   * <p>Claude Code writes one transcript record per content block - thinking, text, tool_use - and
+   * every one of them repeats the identical, complete usage block for the whole message. Summing
+   * the records therefore multiplies a message's tokens by how many blocks it happened to have.
+   * Measured on this project: 1063 records against 458 messages, inflating the total by 58%.
+   *
+   * <p>This is the kind of error that does not announce itself. The number stays plausible, the
+   * ratios between token kinds stay intact, and only the magnitude is wrong.
+   */
+  private static boolean firstTimeSeen(JsonNode message, Set<String> seen) {
+    String id = message.path("id").asString(null);
+    // Without an id there is nothing to deduplicate on; counting it is the lesser risk.
+    return id == null || id.isBlank() || seen.add(id);
+  }
 
   /**
    * Aggregate totals plus the recent entries, kept apart on purpose.
@@ -146,9 +165,10 @@ public class UsageService {
 
     Map<String, TokenUsage> byModel = new LinkedHashMap<>();
     List<Entry> recent = new ArrayList<>();
+    Set<String> seen = new HashSet<>();
     long horizon = Instant.now().getEpochSecond() - RECENT_SECONDS;
     try (Stream<String> lines = Files.lines(transcript, StandardCharsets.UTF_8)) {
-      lines.forEach(line -> accumulate(line, byModel, recent, horizon));
+      lines.forEach(line -> accumulate(line, byModel, recent, horizon, seen));
     } catch (IOException | RuntimeException e) {
       log.debug("cannot read usage from {}: {}", transcript, e.toString());
       return Map.of();
@@ -158,7 +178,11 @@ public class UsageService {
   }
 
   private void accumulate(
-      String line, Map<String, TokenUsage> byModel, List<Entry> recent, long horizon) {
+      String line,
+      Map<String, TokenUsage> byModel,
+      List<Entry> recent,
+      long horizon,
+      Set<String> seen) {
     // Cheap rejection before parsing: most lines carry no usage at all.
     if (!line.contains("\"usage\"")) {
       return;
@@ -172,6 +196,9 @@ public class UsageService {
     JsonNode message = root.path("message");
     JsonNode usage = message.path("usage");
     if (usage.isMissingNode() || usage.isNull()) {
+      return;
+    }
+    if (!firstTimeSeen(message, seen)) {
       return;
     }
 

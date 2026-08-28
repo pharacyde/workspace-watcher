@@ -221,9 +221,9 @@ returns, and an observer must never be able to block or alter the agent it is wa
 
 The header carries what the agents in this workspace have spent. Click it for the breakdown, which
 is per token kind rather than one total — because they are not priced alike, and the difference is
-not small. Measured on this project: 224M cache reads against 1.2M output tokens, and the cache
-reads were **71% of the bill**. A tracker that counted only input and output would have reported a
-fifth of the real figure, confidently.
+not small. Measured on this project: 222M cache reads against 764k output tokens, and the cache
+reads are **79% of the bill**. A tracker that counted only input and output would have reported a
+seventh of the real figure, confidently.
 
 **It says whether it is a bill.** On a Claude subscription nobody pays per token — there is a flat
 fee and usage limits — so the amount is prefixed with `≈` and labelled *what these tokens would

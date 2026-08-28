@@ -167,6 +167,48 @@ class UsageServiceTest {
   }
 
   @Test
+  @DisplayName("counts a message once however many blocks it was written as")
+  void doesNotDoubleCountBlocksOfOneMessage() throws IOException {
+    // Claude Code writes one record per content block - thinking, text, tool_use - and repeats the
+    // identical, complete usage block on each. Summing them multiplied a message's tokens by how
+    // many blocks it happened to have; measured on this project, 58% too high.
+    for (String block : new String[] {"thinking", "text", "tool_use"}) {
+      Files.writeString(
+          transcript,
+          """
+          {"type":"assistant","message":{"id":"msg_1","model":"claude-opus-5",\
+          "content":[{"type":"%s"}],"usage":{"input_tokens":2,"output_tokens":1466,\
+          "cache_read_input_tokens":46196}}}
+          """
+              .formatted(block),
+          StandardCharsets.UTF_8,
+          StandardOpenOption.APPEND);
+    }
+
+    UsageService.Summary summary = usage.summarise(null);
+    assertThat(summary.tokens().output()).isEqualTo(1466);
+    assertThat(summary.tokens().cacheRead()).isEqualTo(46196);
+  }
+
+  @Test
+  @DisplayName("two different messages are both counted")
+  void countsDistinctMessages() throws IOException {
+    for (String id : new String[] {"msg_1", "msg_2"}) {
+      Files.writeString(
+          transcript,
+          """
+          {"type":"assistant","message":{"id":"%s","model":"claude-opus-5",\
+          "content":[{"type":"text"}],"usage":{"input_tokens":1000,"output_tokens":0}}}
+          """
+              .formatted(id),
+          StandardCharsets.UTF_8,
+          StandardOpenOption.APPEND);
+    }
+
+    assertThat(usage.summarise(null).tokens().input()).isEqualTo(2000);
+  }
+
+  @Test
   @DisplayName("re-reads a transcript that has grown")
   void refreshesWhenTranscriptGrows() throws IOException {
     append("claude-opus-5", 1_000_000, 0, 0, 0, 0);

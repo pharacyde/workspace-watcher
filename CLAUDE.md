@@ -195,13 +195,18 @@ own `~/.claude`.
 - **The timeline draws two densities.** File events dwarf agent events by orders of magnitude, so a
   single total bar hides exactly what someone opened the dashboard to see.
 - **Token kinds are priced differently and must stay apart.** A cache read costs a tenth of an
-  input token, a one-hour cache write double one. Measured here, cache reads were 71% of the
+  input token, a one-hour cache write double one.   Measured here, cache reads are 79% of the
   figure — summing the kinds into one number makes the total meaningless.
 - **A cost figure must say what it is.** On a Claude subscription nobody pays per token, so the
   amount is what those tokens would have cost at API rates: a measure of how heavy a session was,
   and not a bill. `Billing` detects this from the local config; the UI prefixes it with `≈` and
   spells it out. Showing it bare would be a confident lie, which is the failure mode this whole
   project is built against.
+- **Count each assistant message once, by `message.id`.** Claude Code writes one transcript record
+  per content block — thinking, text, tool_use — and repeats the identical, complete usage block on
+  every one. Summing the records inflated this project's total by 58%, and it is the kind of error
+  that stays plausible: the ratios between token kinds survive intact and only the magnitude is
+  wrong.
 - **An unpriced model is named, not zeroed and not fatal.** A model with no entry appears in
   `unpricedModels` while everything else is still priced. Voiding the whole total over one unknown
   model hid the cost of every other — and a locally run model, which is the common case here, costs
