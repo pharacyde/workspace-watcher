@@ -22,6 +22,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import be.kleisli.ww.core.EventBus;
 import be.kleisli.ww.core.WatchEvent;
+import be.kleisli.ww.core.Text;
 import be.kleisli.ww.core.WatcherProperties;
 
 /**
@@ -40,7 +41,6 @@ public class TranscriptTailService {
 
     private static final Logger log = LoggerFactory.getLogger(TranscriptTailService.class);
     private static final int SUMMARY_LIMIT = 240;
-    private static final int DETAIL_LIMIT = 4000;
 
     private final WatcherProperties props;
     private final EventBus bus;
@@ -175,7 +175,7 @@ public class TranscriptTailService {
 
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("tool", tool);
-        detail.put("input", truncate(input.toString(), DETAIL_LIMIT));
+        detail.put("input", Text.truncate(input.toString(), Text.DETAIL_LIMIT));
 
         bus.publish(WatchEvent.of(WatchEvent.Source.TRANSCRIPT, "TOOL_USE")
                 .agent("claude-code")
@@ -195,7 +195,7 @@ public class TranscriptTailService {
                 .agent("claude-code")
                 .session(session)
                 .summary(label == null ? "result" : label)
-                .detail("output", truncate(body, DETAIL_LIMIT)));
+                .detail("output", Text.truncate(body, Text.DETAIL_LIMIT)));
     }
 
     /** A short, human-readable line for the activity feed. */
@@ -213,7 +213,7 @@ public class TranscriptTailService {
             return tool;
         }
         String firstLine = value.lines().findFirst().orElse(value);
-        return tool + "  " + truncate(firstLine, SUMMARY_LIMIT);
+        return tool + "  " + Text.truncate(firstLine, SUMMARY_LIMIT);
     }
 
     /** File-touching tools get a workspace-relative path so the UI can link them to a diff. */
@@ -225,13 +225,6 @@ public class TranscriptTailService {
         Path workspace = props.workspacePath();
         Path path = Path.of(raw).toAbsolutePath().normalize();
         return path.startsWith(workspace) ? workspace.relativize(path).toString() : raw;
-    }
-
-    private static String truncate(String value, int limit) {
-        if (value == null) {
-            return null;
-        }
-        return value.length() <= limit ? value : value.substring(0, limit) + "…";
     }
 
     /** Exposed for the status endpoint so the UI can say whether layer 1 is actually live. */

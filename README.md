@@ -109,7 +109,24 @@ The script base64-encodes the payload from stdin and posts it as the `recordAgen
 Base64 sidesteps every shell and JSON quoting problem without needing `jq` or `python` on the host.
 
 It always exits 0 and discards all output. A hook blocks the agent until it returns, and an observer
-must never be able to block or alter the agent it is watching.
+must never be able to block or alter the agent it is watching. Measured on loopback:
+
+| watcher state | cost per tool call |
+|---|---|
+| running | 20 ms, or 90 ms for a 1.5 MB payload |
+| not running | 10 ms — the connection is refused immediately |
+| accepting but stalled | 2 s once, then 10 ms for a minute (circuit breaker) |
+
+That last row is the case worth designing for. A watcher that is simply absent is free; one that
+accepts the connection and then hangs — a garbage-collecting JVM, an unreachable host in
+`WORKSPACE_WATCHER_URL` — would otherwise charge its timeout to *every* tool call. After one
+failure the script goes quiet for a minute. Losing a minute of hook events costs nothing, because
+the transcript tail is the authoritative record and catches up on its own.
+
+The request body is streamed into `curl` on stdin rather than passed as an argument. Hook payloads
+carry `tool_response`, which for a large file read easily exceeds `ARG_MAX` (1 MB on macOS); as an
+argument that fails with *argument list too long* and the event vanishes silently, which is the
+worst failure mode an observability tool can have.
 
 ## Configuration
 

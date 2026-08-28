@@ -17,6 +17,7 @@ import org.springframework.stereotype.Controller;
 import be.kleisli.ww.claude.TranscriptTailService;
 import be.kleisli.ww.core.EventBus;
 import be.kleisli.ww.core.WatchEvent;
+import be.kleisli.ww.core.Text;
 import be.kleisli.ww.core.WatcherProperties;
 import be.kleisli.ww.git.GitService;
 import be.kleisli.ww.proc.ProcessTreeService;
@@ -119,8 +120,10 @@ public class WatchGraphQlController {
             summary += "  " + path;
         }
 
+        // Store a bounded rendering, not the parsed tree: a tool_response from a large file read
+        // can be megabytes, and thousands of those would sit in the ring buffer forever.
         Map<String, Object> detail = new LinkedHashMap<>();
-        detail.put("payload", payload);
+        detail.put("payload", Text.truncate(decoded));
 
         bus.publish(WatchEvent.of(WatchEvent.Source.HOOK, hookName == null ? "HOOK" : hookName)
                 .agent(agent == null ? "claude-code" : agent)

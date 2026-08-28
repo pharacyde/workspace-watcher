@@ -64,6 +64,10 @@ no CDN, works offline.
   Replaying a finished session would bury the live one.
 - **Partial lines.** The tail only consumes up to the last newline in the chunk it read, and advances
   the byte offset by exactly that much — otherwise a half-flushed line corrupts UTF-8 decoding.
+- **The hook script must stay fast and silent.** It runs on every tool call and blocks the agent
+  until it returns. Three properties are load-bearing, all three verified by measurement: the body
+  is streamed on stdin (payloads exceed `ARG_MAX`), `--max-time` is tight, and one failure trips a
+  60-second circuit breaker so a stalled watcher cannot tax every subsequent call.
 - **`lsof +D` is a trap.** It walks the entire tree on every call. `lsof -a -d cwd -F pn` returns all
   processes' working directories in one cheap call; filter in Java.
 - **The subscription must not have a gap.** `EventBus.stream()` snapshots history and registers the
