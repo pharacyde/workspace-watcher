@@ -4,9 +4,10 @@ import { LatestController } from '../api/subscriptions';
 import { panelStyles } from '../styles';
 
 export class GitPanel extends LitElement {
-  static properties = { selected: { type: String } };
+  static properties = { selected: { type: String }, search: { attribute: false } };
 
   declare selected: string | null;
+  declare search: string;
 
   static styles = [
     panelStyles,
@@ -40,6 +41,7 @@ export class GitPanel extends LitElement {
   constructor() {
     super();
     this.selected = null;
+    this.search = '';
   }
 
   private select(path: string) {
@@ -52,10 +54,14 @@ export class GitPanel extends LitElement {
 
   render() {
     const snapshot = this.git.value?.gitStatus;
+    const needle = (this.search ?? '').toLowerCase();
+    const files = (snapshot?.files ?? []).filter(
+      (file) => needle === '' || file.path.toLowerCase().includes(needle),
+    );
     return html`
       <h2>
         Working tree
-        ${snapshot?.repo ? html`<span class="count">${snapshot.files.length}</span>` : ''}
+        ${snapshot?.repo ? html`<span class="count">${files.length}</span>` : ''}
         <span class="note">${snapshot?.headSubject ?? ''}</span>
       </h2>
       <div class="body">
@@ -63,9 +69,9 @@ export class GitPanel extends LitElement {
           ? html`<p class="empty">connecting…</p>`
           : !snapshot.repo
             ? html`<p class="empty">not a git repository</p>`
-            : snapshot.files.length === 0
-              ? html`<p class="empty">clean</p>`
-              : snapshot.files.map(
+            : files.length === 0
+              ? html`<p class="empty">${needle ? 'no match' : 'clean'}</p>`
+              : files.map(
                   (file) => html`
                     <div
                       class="rowline ${file.status} ${file.path === this.selected ? 'selected' : ''}"

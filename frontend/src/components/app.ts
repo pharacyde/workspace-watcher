@@ -19,14 +19,18 @@ export class App extends LitElement {
     workspace: { state: true },
     hasTranscripts: { state: true },
     selected: { state: true },
+    selectedEvent: { state: true },
     connection: { state: true },
+    search: { state: true },
     replay: { state: true },
   };
 
   declare private workspace: string;
   declare private hasTranscripts: boolean;
   declare private selected: string | null;
+  declare private selectedEvent: unknown | null;
   declare private connection: ConnectionState;
+  declare private search: string;
   declare private replay: { since: string; until: string } | null;
 
   private releaseConnection?: () => void;
@@ -72,6 +76,20 @@ export class App extends LitElement {
       color: var(--add);
       border-color: var(--add);
     }
+    input[type='search'] {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      font: inherit;
+      font-size: 12px;
+      padding: 1px 6px;
+      width: 22ch;
+    }
+    input[type='search']:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
     .pill.reconnecting {
       color: var(--del);
       border-color: var(--del);
@@ -105,14 +123,22 @@ export class App extends LitElement {
     this.workspace = 'connecting…';
     this.hasTranscripts = true;
     this.selected = null;
+    this.selectedEvent = null;
     this.connection = 'connecting';
+    this.search = '';
     this.replay = null;
   }
 
   connectedCallback(): void {
     super.connectedCallback();
+    // One inspector, two things to inspect. The last click wins rather than the panel trying to
+    // show both, which would leave you guessing which one you are looking at.
     this.addEventListener('file-selected', (event) => {
       this.selected = (event as CustomEvent<string>).detail;
+      this.selectedEvent = null;
+    });
+    this.addEventListener('event-selected', (event) => {
+      this.selectedEvent = (event as CustomEvent<unknown>).detail;
     });
     this.releaseConnection = onConnectionState((state) => (this.connection = state));
     this.addEventListener('replay-range', (event) => {
@@ -125,6 +151,7 @@ export class App extends LitElement {
         const current = this.active.value?.activeWorkspace ?? null;
         if (current !== null && previous !== null && current !== previous) {
           this.selected = null;
+          this.selectedEvent = null;
           this.replay = null;
         }
         previous = current;
@@ -180,6 +207,13 @@ export class App extends LitElement {
         <h1>workspace-watcher</h1>
         ${this.workspacePicker()}
         <span class="pill ${this.connection}">${this.connection}</span>
+        <input
+          type="search"
+          placeholder="search all panels…"
+          .value=${this.search}
+          title="Filters the activity feed, the working tree and the process list at once"
+          @input=${(e: Event) => (this.search = (e.target as HTMLInputElement).value)}
+        />
         <ww-usage></ww-usage>
         ${this.hasTranscripts
           ? ''
@@ -190,10 +224,10 @@ export class App extends LitElement {
             >`}
       </header>
       <main>
-        <ww-process-panel></ww-process-panel>
-        <ww-feed .replay=${this.replay} .workspace=${this.active.value?.activeWorkspace ?? null}></ww-feed>
-        <ww-git-panel .selected=${this.selected}></ww-git-panel>
-        <ww-diff-panel .path=${this.selected}></ww-diff-panel>
+        <ww-process-panel .search=${this.search}></ww-process-panel>
+        <ww-feed .search=${this.search} .replay=${this.replay} .workspace=${this.active.value?.activeWorkspace ?? null}></ww-feed>
+        <ww-git-panel .selected=${this.selected} .search=${this.search}></ww-git-panel>
+        <ww-diff-panel .path=${this.selected} .event=${this.selectedEvent}></ww-diff-panel>
       </main>
       <ww-timeline></ww-timeline>
     `;

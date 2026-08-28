@@ -6,6 +6,10 @@ import { panelStyles } from '../styles';
 type Node = { pid: string; command: string; cwd: string; children?: readonly Node[] | null };
 
 export class ProcessPanel extends LitElement {
+  static properties = { search: { attribute: false } };
+
+  declare search: string;
+
   static styles = [
     panelStyles,
     css`
@@ -18,6 +22,18 @@ export class ProcessPanel extends LitElement {
   ];
 
   private readonly tree = new LatestController(this, ProcessTreeDocument);
+
+  constructor() {
+    super();
+    this.search = '';
+  }
+
+  /** A match anywhere in a subtree keeps that subtree, so a hit is never orphaned from its parent. */
+  private subtreeMatches(node: Node, needle: string): boolean {
+    if (needle === '') return true;
+    if (node.command.toLowerCase().includes(needle) || node.pid.includes(needle)) return true;
+    return (node.children ?? []).some((child) => this.subtreeMatches(child, needle));
+  }
 
   private row(node: Node, depth: number): TemplateResult[] {
     const indent = '  '.repeat(depth) + (depth > 0 ? '└─ ' : '');
@@ -45,7 +61,9 @@ export class ProcessPanel extends LitElement {
       <div class="body">
         ${!snapshot || snapshot.roots.length === 0
           ? html`<p class="empty">no processes with a working directory inside this workspace</p>`
-          : snapshot.roots.flatMap((root) => this.row(root as Node, 0))}
+          : snapshot.roots
+              .filter((root) => this.subtreeMatches(root as Node, (this.search ?? '').toLowerCase()))
+              .flatMap((root) => this.row(root as Node, 0))}
       </div>
     `;
   }

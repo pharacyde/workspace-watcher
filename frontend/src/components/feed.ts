@@ -33,6 +33,7 @@ export class Feed extends LitElement {
     session: { state: true },
     replay: { attribute: false },
     follow: { state: true },
+    search: { attribute: false },
     workspace: { attribute: false },
     replayed: { state: true },
   };
@@ -40,6 +41,8 @@ export class Feed extends LitElement {
   declare private hidden_: Set<Source>;
   /** Auto-scroll to the newest row, like tail -f. */
   declare private follow: boolean;
+  /** Shared across every panel; empty means no filtering. */
+  declare search: string;
   /** Empty means every agent in this workspace. */
   declare private session: string;
   /** Set by the timeline to a recorded window; null means follow the live stream. */
@@ -140,7 +143,7 @@ export class Feed extends LitElement {
 
   private readonly log = new EventLogController<Event>(this, EventsDocument, MAX_EVENTS);
   private readonly sessions = new LatestController(this, SessionsDocument);
-  private stuckToBottom = true;
+
 
   // Filtering runs on every render, and render runs once per animation frame. Recomputing over
   // MAX_EVENTS items each time is exactly the per-frame work the batching exists to avoid, so the
@@ -149,6 +152,7 @@ export class Feed extends LitElement {
     items: Event[];
     hidden: Set<Source>;
     session: string;
+    search: string;
     result: Event[];
   } | null = null;
 
@@ -156,6 +160,7 @@ export class Feed extends LitElement {
     super();
     this.hidden_ = new Set();
     this.follow = true;
+    this.search = '';
     this.session = '';
     this.replay = null;
     this.replayed = [];
@@ -168,22 +173,48 @@ export class Feed extends LitElement {
     this.hidden_ = next;
   }
 
-  private onScroll(event: globalThis.Event) {
-    // Follow the tail only while the reader is already at the bottom; yanking the viewport away
-    // from someone reading history is the fastest way to make a live feed useless.
-    const el = event.target as HTMLElement;
-    this.stuckToBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  /**
+   * Scrolling up by hand turns following off, the way every tail-like view does.
+   *
+   * <p>Bound to wheel, touch and keys rather than to the scroll event, because a scroll event
+   * cannot tell whose scroll it was. Assigning scrollTop fires one too, and measuring a layout the
+   * virtualizer was still growing made an earlier version conclude "not at the bottom" and switch
+   * following off permanently - one row in, and the feed silently stopped following.
+   */
+  private onUserScroll = () => {
+    if (!this.follow) return;
+    const list = this.list;
+    if (!list) return;
+    if (list.scrollHeight - list.scrollTop - list.clientHeight > 80) {
+      this.follow = false;
+    }
+  };
+
+  private get list(): (HTMLElement & { layoutComplete?: Promise<void> }) | null {
+    return this.renderRoot.querySelector('lit-virtualizer');
   }
 
-  private followTail() {
+  private async followTail(count: number) {
     // Two conditions, deliberately: the button is the intent, being scrolled to the bottom is the
     // moment. Following while someone has scrolled up to read would yank the view away from them.
-    if (!this.follow || !this.stuckToBottom || this.replay) return;
-    const list = this.renderRoot.querySelector('lit-virtualizer');
-    if (list) list.scrollTop = list.scrollHeight;
+    if (!this.follow || this.replay || count === 0) return;
+    const list = this.list;
+    if (!list) return;
+
+    // Awaiting layoutComplete is the part that matters: the virtualizer measures its rows
+    // asynchronously, so before it resolves scrollHeight does not yet include the rows that just
+    // arrived and scrolling to it lands short - the feed then silently stops following.
+    //
+    // scrollTop rather than scrollToIndex: that method is a documented shim the library plans to
+    // remove, and it threw "Cannot set properties of null" on a row it had not laid out yet.
+    // With the scroller attribute set, this element is the scroll container, so this is direct.
+    await list.layoutComplete;
+    if (!this.follow) return;
+    list.scrollTop = list.scrollHeight;
   }
 
   updated(changed: Map<string, unknown>) {
+    void this.followTail(this.visibleEvents().length);
     if (changed.has('workspace') && changed.get('workspace') != null) {
       // A switch starts a new chronicle. Keeping the old events, or a session filter naming a
       // session from the previous project, would describe the wrong workspace.
@@ -191,7 +222,6 @@ export class Feed extends LitElement {
       this.session = '';
       this.cache = null;
     }
-    this.followTail();
     if (!changed.has('replay')) return;
     if (!this.replay) {
       this.replayed = [];
@@ -210,7 +240,8 @@ export class Feed extends LitElement {
       this.cache &&
       this.cache.items === items &&
       this.cache.hidden === this.hidden_ &&
-      this.cache.session === this.session
+      this.cache.session === this.session &&
+      this.cache.search === this.search
     ) {
       return this.cache.result;
     }
@@ -218,18 +249,30 @@ export class Feed extends LitElement {
     // included: they carry no session, so claiming they belong to the selected one would be a
     // guess of exactly the kind this project refuses to make elsewhere.
     const source = this.replay ? this.replayed : this.log.items;
+    const needle = this.search.toLowerCase();
     const result = source.filter(
       (event) =>
         !this.hidden_.has(event.source) &&
-        (this.session === '' || event.sessionId === this.session),
+        (this.session === '' || event.sessionId === this.session) &&
+        (needle === '' ||
+          (event.summary ?? '').toLowerCase().includes(needle) ||
+          (event.path ?? '').toLowerCase().includes(needle)),
     );
-    this.cache = { items: source, hidden: this.hidden_, session: this.session, result };
+    this.cache = {
+      items: source,
+      hidden: this.hidden_,
+      session: this.session,
+      search: this.search,
+      result,
+    };
     return result;
   }
 
   private sessionPicker() {
     const entries = this.sessions.value?.sessions ?? [];
-    if (entries.length < 2) {
+    // Shown even for a single session: hiding it made the filter invisible on a fresh project,
+    // and "1 agent" is information too.
+    if (entries.length === 0) {
       return '';
     }
     return html`
@@ -264,10 +307,7 @@ export class Feed extends LitElement {
         <button
           class=${this.follow ? 'on' : ''}
           title="Scroll to the newest row as it arrives, like tail -f"
-          @click=${() => {
-            this.follow = !this.follow;
-            if (this.follow) this.stuckToBottom = true;
-          }}
+          @click=${() => (this.follow = !this.follow)}
         >
           ${this.follow ? '⤓ follow' : '⤓ follow off'}
         </button>
@@ -295,12 +335,15 @@ export class Feed extends LitElement {
           )}
         </span>
       </h2>
-      <div class="body" style="padding:0">
+      <div class="body" style="padding:0;overflow:hidden">
         ${visible.length === 0
           ? html`<p class="empty">waiting for activity…</p>`
           : html`
               <lit-virtualizer
-                @scroll=${this.onScroll}
+                scroller
+                @wheel=${this.onUserScroll}
+                @touchmove=${this.onUserScroll}
+                @keydown=${this.onUserScroll}
                 .items=${visible}
                 .renderItem=${(event: Event | undefined) =>
                   // The virtualizer can ask for an index the list no longer has, in the frame
@@ -310,12 +353,11 @@ export class Feed extends LitElement {
                     : html`
                   <div
                     class="rowline ${event.type === 'TOOL_ERROR' ? 'error' : ''} ${event.source}"
-                    style=${event.path ? 'cursor:pointer' : ''}
+                    style="cursor:pointer"
                     @click=${() =>
-                      event.path &&
                       this.dispatchEvent(
-                        new CustomEvent('file-selected', {
-                          detail: event.path,
+                        new CustomEvent('event-selected', {
+                          detail: event,
                           bubbles: true,
                           composed: true,
                         }),

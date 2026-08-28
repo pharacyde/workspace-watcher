@@ -80,6 +80,14 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
 - **Events are batched onto one animation frame.** A build produces thousands of events per second;
   updating per event spends the whole frame budget on layout. The feed is virtualised for the same
   reason. The transport is never the bottleneck here - the DOM is.
+- **Following the tail listens for wheel/touch/key, never for `scroll`.** A scroll event cannot say
+  whose scroll it was: assigning `scrollTop` fires one, and measuring a layout the virtualizer was
+  still growing made an earlier version decide "not at the bottom" and switch following off
+  permanently — one row in, and the feed silently stopped.
+- **`lit-virtualizer` needs the `scroller` attribute to be its own scroll container.** Without it,
+  it scrolls the nearest scrolling ancestor and setting `scrollTop` on the element does nothing.
+  Scroll after awaiting `layoutComplete`; rows are measured asynchronously. Avoid `scrollToIndex` —
+  the library documents it as a shim it plans to remove, and it threw on an unlaid-out row.
 - **Monaco needs its stylesheet adopted into the shadow root.** Vite bundles the CSS Monaco's
   modules import into the *document* stylesheet, which a shadow root cannot see. Without
   `monacoStyleSheet()` the editor renders unstyled and the panel grows to full content height -

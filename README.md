@@ -86,6 +86,15 @@ colour. Click a slice to scrub back into it; the activity panel becomes a replay
 read from the database rather than the buffer, so it reaches back past what the live stream still
 holds. A button returns you to live.
 
+A search box in the header filters **every panel at once** — the activity feed, the working tree and
+the process list. In the process tree a match anywhere in a subtree keeps that subtree, so a hit is
+never orphaned from its parent.
+
+Clicking a row opens the event in the fourth panel: the full tool output, not the one-line headline.
+That output has a `wrap` toggle, off by default — build output and stack traces are column-aligned,
+and wrapping them destroys the alignment that makes them readable. Clicking a file in the working
+tree shows its diff there instead; the last click wins, so you always know what you are looking at.
+
 The activity panel has `follow` and `pause`. Follow is `tail -f`: scroll to the newest row as it
 arrives, and it yields while you are scrolled up reading. Pause holds new events rather than
 dropping them — the button shows how many are waiting, and resuming plays them in.
