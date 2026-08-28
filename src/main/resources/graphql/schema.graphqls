@@ -5,7 +5,7 @@ type WatchEvent {
   ts: String!
   """
   How this event is known. TRANSCRIPT and HOOK carry real attribution straight from the agent;
-  FS and PROCESS are the generic safety net and claim no actor.
+  FS is the generic safety net and claims no actor.
   """
   source: Source!
   "CREATED, MODIFIED, TOOL_USE, TOOL_ERROR, STATUS, SNAPSHOT, …"
@@ -14,7 +14,7 @@ type WatchEvent {
   "Workspace-relative path, when the event is about one file."
   path: String
   pid: ID
-  "Which agent produced this, when known. Always null for FS and PROCESS events."
+  "Which agent produced this, when known. Always null for FS events."
   agent: String
   sessionId: String
   "Raw payload as a JSON string. Shape depends on source; treat as opaque."
@@ -54,12 +54,6 @@ type ProcessNode {
   children: [ProcessNode!]!
 }
 
-type Diff {
-  path: String!
-  staged: String!
-  unstaged: String!
-}
-
 """
 The two sides of a file, for a side-by-side diff view. A unified diff string cannot drive one:
 the editor needs both documents, not a description of their difference.
@@ -95,10 +89,7 @@ type Status {
 
 type Query {
   status: Status!
-  "Unified diff for one workspace-relative path. Paths outside the workspace are rejected."
-  diff(path: String!): Diff!
-
-  "Both sides of a file, for a side-by-side editor. Paths outside the workspace are rejected."
+  "Both sides of a file. The path is as gitStatus reports it, relative to the repository root."
   fileVersions(path: String!): FileVersions!
   "Most recent events from the in-memory buffer, oldest first."
   recentEvents(limit: Int = 200): [WatchEvent!]!

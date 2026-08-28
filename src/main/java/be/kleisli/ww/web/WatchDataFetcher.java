@@ -5,7 +5,6 @@ import be.kleisli.ww.claude.TranscriptTailService;
 import be.kleisli.ww.core.EventBus;
 import be.kleisli.ww.core.WatchEvent;
 import be.kleisli.ww.core.WatcherProperties;
-import be.kleisli.ww.generated.types.Diff;
 import be.kleisli.ww.generated.types.FileVersions;
 import be.kleisli.ww.generated.types.GitSnapshot;
 import be.kleisli.ww.generated.types.ProcessSnapshot;
@@ -19,7 +18,6 @@ import com.netflix.graphql.dgs.DgsSubscription;
 import com.netflix.graphql.dgs.InputArgument;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Base64;
 import java.util.List;
 import org.reactivestreams.Publisher;
@@ -43,7 +41,7 @@ public class WatchDataFetcher {
   private final ProcessTreeService processes;
   private final TranscriptTailService transcripts;
   private final ApiMapper mapper;
-  private final ObjectMapper objectMapper = new ObjectMapper();
+  private final ObjectMapper objectMapper;
 
   public WatchDataFetcher(
       WatcherProperties properties,
@@ -51,13 +49,15 @@ public class WatchDataFetcher {
       GitService git,
       ProcessTreeService processes,
       TranscriptTailService transcripts,
-      ApiMapper mapper) {
+      ApiMapper mapper,
+      ObjectMapper objectMapper) {
     this.properties = properties;
     this.eventBus = eventBus;
     this.git = git;
     this.processes = processes;
     this.transcripts = transcripts;
     this.mapper = mapper;
+    this.objectMapper = objectMapper;
   }
 
   @DgsQuery
@@ -72,29 +72,16 @@ public class WatchDataFetcher {
         .build();
   }
 
-  @DgsQuery
-  public Diff diff(@InputArgument String path) {
-    return mapper.toDiff(git.diff(insideWorkspace(path)));
-  }
-
   /**
-   * Rejects path traversal: only paths that resolve back inside the workspace are served.
+   * Both sides of a file, for a side-by-side editor.
    *
-   * @return the path relative to the workspace root
+   * <p>The path is whatever git reported, so it is repository-root-relative. Resolving and
+   * validating it belongs to {@link GitService}, because only it knows where the root is.
    */
-  private String insideWorkspace(String path) {
-    Path workspace = properties.workspacePath();
-    Path resolved = workspace.resolve(path).normalize();
-    if (!resolved.startsWith(workspace)) {
-      throw new IllegalArgumentException("path outside workspace");
-    }
-    return workspace.relativize(resolved).toString();
-  }
-
-  /** Both sides of a file, for a side-by-side editor. */
   @DgsQuery
   public FileVersions fileVersions(@InputArgument String path) {
-    return mapper.toFileVersions(git.versions(insideWorkspace(path)));
+    git.resolveInRepo(path);
+    return mapper.toFileVersions(git.versions(path));
   }
 
   @DgsQuery

@@ -1,5 +1,5 @@
 import { css, html, LitElement } from 'lit';
-import { request } from '../api/client';
+import { onConnectionState, request, type ConnectionState } from '../api/client';
 import { StatusDocument } from '../api/documents';
 import './diff-panel';
 import './feed';
@@ -11,11 +11,15 @@ export class App extends LitElement {
     workspace: { state: true },
     hasTranscripts: { state: true },
     selected: { state: true },
+    connection: { state: true },
   };
 
   declare private workspace: string;
   declare private hasTranscripts: boolean;
   declare private selected: string | null;
+  declare private connection: ConnectionState;
+
+  private releaseConnection?: () => void;
 
   static styles = css`
     :host {
@@ -51,6 +55,14 @@ export class App extends LitElement {
       color: var(--warn);
       border-color: var(--warn);
     }
+    .pill.live {
+      color: var(--add);
+      border-color: var(--add);
+    }
+    .pill.reconnecting {
+      color: var(--del);
+      border-color: var(--del);
+    }
     main {
       flex: 1;
       min-height: 0;
@@ -67,6 +79,7 @@ export class App extends LitElement {
     this.workspace = 'connecting…';
     this.hasTranscripts = true;
     this.selected = null;
+    this.connection = 'connecting';
   }
 
   connectedCallback(): void {
@@ -74,6 +87,7 @@ export class App extends LitElement {
     this.addEventListener('file-selected', (event) => {
       this.selected = (event as CustomEvent<string>).detail;
     });
+    this.releaseConnection = onConnectionState((state) => (this.connection = state));
     request(StatusDocument)
       .then(({ status }) => {
         this.workspace = status.workspace;
@@ -82,11 +96,17 @@ export class App extends LitElement {
       .catch(() => (this.workspace = 'backend unreachable'));
   }
 
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.releaseConnection?.();
+  }
+
   render() {
     return html`
       <header>
         <h1>workspace-watcher</h1>
         <span class="path">${this.workspace}</span>
+        <span class="pill ${this.connection}">${this.connection}</span>
         ${this.hasTranscripts
           ? ''
           : html`<span

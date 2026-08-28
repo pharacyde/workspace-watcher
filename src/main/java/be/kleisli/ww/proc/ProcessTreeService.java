@@ -42,10 +42,6 @@ public class ProcessTreeService {
     stream.publish(new Snapshot(Instant.now().toString(), 0, List.of()));
   }
 
-  public List<Node> current() {
-    return lastTree;
-  }
-
   public Snapshot currentSnapshot() {
     return stream.current();
   }

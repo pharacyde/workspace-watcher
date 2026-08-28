@@ -61,8 +61,8 @@ be.kleisli.ww
 └── web      WatchGraphQlController (queries, subscription, hook mutation), GqlEvent
 ```
 
-Frontend lives in `src/main/resources/static/` and is deliberately plain HTML/CSS/JS: no build step,
-no CDN, works offline.
+Frontend lives in `frontend/` and is built into `src/main/resources/static/`, which is generated
+output and gitignored. See the Frontend section below.
 
 ## Frontend
 

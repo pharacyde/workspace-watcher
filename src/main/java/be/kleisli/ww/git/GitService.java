@@ -8,9 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -36,15 +34,23 @@ public class GitService {
 
   private final WatcherProperties props;
   private final StateStream<Snapshot> stream = new StateStream<>();
-  private volatile Snapshot last = NOT_A_REPO;
+
+  /**
+   * Repository root, which is not necessarily the workspace.
+   *
+   * <p>Every path git reports is relative to this, never to the workspace, so every path git is
+   * handed must be too.
+   */
+  private volatile Path root;
 
   public GitService(WatcherProperties props) {
     this.props = props;
-    stream.publish(last);
+    this.root = props.workspacePath();
+    stream.publish(NOT_A_REPO);
   }
 
   public Snapshot current() {
-    return last;
+    return stream.current();
   }
 
   public StateStream<Snapshot> stream() {
@@ -54,11 +60,26 @@ public class GitService {
   /** Recomputes the working tree and broadcasts it only when something actually changed. */
   public synchronized void refresh() {
     Snapshot snapshot = read();
-    if (snapshot.equals(last)) {
+    if (snapshot.equals(stream.current())) {
       return;
     }
-    last = snapshot;
     stream.publish(snapshot);
+  }
+
+  /**
+   * Resolves a git-reported path to a real file, and rejects anything outside the repository.
+   *
+   * <p>Resolved against the repository root rather than the workspace. {@code git status
+   * --porcelain} emits repository-root-relative paths whatever directory it runs in, so resolving
+   * them against a workspace that sits in a subdirectory silently points at a file that does not
+   * exist.
+   */
+  public Path resolveInRepo(String relativePath) {
+    Path resolved = root.resolve(relativePath).normalize();
+    if (!resolved.startsWith(root)) {
+      throw new IllegalArgumentException("path outside repository");
+    }
+    return resolved;
   }
 
   private Snapshot read() {
@@ -66,18 +87,23 @@ public class GitService {
     if (!Files.isDirectory(ws)) {
       return NOT_A_REPO;
     }
-    Shell.Result inside = Shell.run(ws, List.of("git", "rev-parse", "--is-inside-work-tree"), 5);
-    if (!inside.ok() || !inside.stdout().strip().equals("true")) {
+    Shell.Result toplevel = Shell.run(ws, List.of("git", "rev-parse", "--show-toplevel"), 5);
+    if (!toplevel.ok() || toplevel.stdout().isBlank()) {
+      root = ws;
       return NOT_A_REPO;
     }
+    root = Path.of(toplevel.stdout().strip()).toAbsolutePath().normalize();
 
     String branch = Shell.run(ws, List.of("git", "branch", "--show-current"), 5).stdout().strip();
     String head = Shell.run(ws, List.of("git", "rev-parse", "--short", "HEAD"), 5).stdout().strip();
     String subject = Shell.run(ws, List.of("git", "log", "-1", "--format=%s"), 5).stdout().strip();
 
     List<FileStatus> files = new ArrayList<>();
+    // Scoped to the workspace with "-- ." so observing a subdirectory does not list the whole
+    // repository. Paths come back repository-root-relative regardless; see resolveInRepo.
     Shell.Result status =
-        Shell.run(ws, List.of("git", "status", "--porcelain=v1", "--untracked-files=all"), 15);
+        Shell.run(
+            ws, List.of("git", "status", "--porcelain=v1", "--untracked-files=all", "--", "."), 15);
     for (String line : status.lines()) {
       if (line.length() < 4) {
         continue;
@@ -113,10 +139,10 @@ public class GitService {
    * agent wrote a moment ago even before anything is staged.
    */
   public Versions versions(String relativePath) {
-    Path workspace = props.workspacePath();
-    Path file = workspace.resolve(relativePath).normalize();
+    Path file = resolveInRepo(relativePath);
 
-    String head = Shell.run(workspace, List.of("git", "show", "HEAD:" + relativePath), 15).stdout();
+    // Run from the repository root: "HEAD:<path>" is resolved from there, not from the cwd.
+    String head = Shell.run(root, List.of("git", "show", "HEAD:" + relativePath), 15).stdout();
 
     String working = "";
     boolean binary = false;
@@ -147,23 +173,5 @@ public class GitService {
       return new Versions(relativePath, "", "", binary, tooLarge);
     }
     return new Versions(relativePath, head, working, false, false);
-  }
-
-  /** Unified diff for one path, staged and unstaged combined. Empty for untracked files. */
-  public Map<String, String> diff(String relativePath) {
-    Path ws = props.workspacePath();
-    Map<String, String> result = new LinkedHashMap<>();
-    result.put("path", relativePath);
-    result.put("unstaged", Shell.run(ws, List.of("git", "diff", "--", relativePath), 15).stdout());
-    result.put(
-        "staged",
-        Shell.run(ws, List.of("git", "diff", "--cached", "--", relativePath), 15).stdout());
-    if (result.get("unstaged").isBlank() && result.get("staged").isBlank()) {
-      // Untracked: show the file as if every line were added.
-      Shell.Result untracked =
-          Shell.run(ws, List.of("git", "diff", "--no-index", "--", "/dev/null", relativePath), 15);
-      result.put("unstaged", untracked.stdout());
-    }
-    return result;
   }
 }

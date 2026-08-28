@@ -1,5 +1,7 @@
 package be.kleisli.ww.core;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
@@ -17,12 +19,24 @@ import reactor.core.publisher.Sinks;
  */
 public class StateStream<T> {
 
+  private static final Logger log = LoggerFactory.getLogger(StateStream.class);
+
   private final Sinks.Many<T> sink = Sinks.many().replay().latest();
   private volatile T current;
 
+  /**
+   * Publishes a new value.
+   *
+   * <p>A failed emit is logged rather than swallowed. Producers only publish on change, so a
+   * dropped emit is not retried: the next poll sees "nothing changed" and returns early, and the
+   * panel silently freezes on a stale value until the state happens to move again.
+   */
   public void publish(T value) {
     this.current = value;
-    sink.tryEmitNext(value);
+    Sinks.EmitResult result = sink.tryEmitNext(value);
+    if (result.isFailure()) {
+      log.warn("state emit failed ({}); a panel may now be showing a stale value", result);
+    }
   }
 
   public T current() {

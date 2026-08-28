@@ -33,10 +33,6 @@ public record WatchEvent(
     HOOK,
     /** Raw filesystem change. No actor is known — do not guess one. */
     FS,
-    /** Git working-tree state. */
-    GIT,
-    /** Process tree snapshot. */
-    PROCESS,
     /** The watcher talking about itself. */
     SYSTEM
   }

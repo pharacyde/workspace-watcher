@@ -39,12 +39,17 @@ export class LatestController<TResult> implements ReactiveController {
  * event would spend the whole frame budget on layout. Arrivals accumulate in an array and trigger
  * at most one update per animation frame, which caps rendering at the display refresh rate no
  * matter how fast events arrive. The transport is never the bottleneck here - the DOM is.
+ *
+ * <p>Arrivals are deduplicated on the server-assigned sequence number. The client reconnects
+ * forever, and every reconnect re-runs the subscription, which replays the server's whole buffer -
+ * without this, one dropped socket would paste up to two thousand duplicate rows into the feed.
  */
-export class EventLogController<TItem> implements ReactiveController {
+export class EventLogController<TItem extends { seq: string }> implements ReactiveController {
   items: TItem[] = [];
   private pending: TItem[] = [];
   private frame: number | null = null;
   private unsubscribe?: () => void;
+  private lastSeq = 0;
 
   constructor(
     private readonly host: ReactiveControllerHost,
@@ -56,6 +61,9 @@ export class EventLogController<TItem> implements ReactiveController {
 
   hostConnected(): void {
     this.unsubscribe = subscribe(this.document, (data) => {
+      const seq = Number(data.events.seq);
+      if (seq <= this.lastSeq) return;
+      this.lastSeq = seq;
       this.pending.push(data.events);
       this.frame ??= requestAnimationFrame(() => this.flush());
     });
@@ -65,6 +73,9 @@ export class EventLogController<TItem> implements ReactiveController {
     this.unsubscribe?.();
     if (this.frame !== null) cancelAnimationFrame(this.frame);
     this.frame = null;
+    // Dropped rather than kept: they would otherwise arrive in the feed out of order after a
+    // later reconnect.
+    this.pending = [];
   }
 
   private flush(): void {

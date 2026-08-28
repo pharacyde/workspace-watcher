@@ -61,7 +61,9 @@ export class DiffPanel extends LitElement {
     // pay for it up front.
     Promise.all([loadMonaco(), request(FileVersionsDocument, { path: requested })])
       .then(async ([monaco, { fileVersions }]) => {
-        if (this.path !== requested) return;
+        // isConnected as well as the path check: disconnectedCallback may have run while Monaco
+        // was loading, and creating an editor on a detached container leaks it permanently.
+        if (!this.isConnected || this.path !== requested) return;
         if (fileVersions.binary) return void (this.message = 'binary file');
         if (fileVersions.tooLarge) return void (this.message = 'file too large to diff');
         this.message = null;
@@ -71,6 +73,7 @@ export class DiffPanel extends LitElement {
 
         const shadow = this.renderRoot as ShadowRoot;
         const sheet = await monacoStyleSheet();
+        if (!this.isConnected || this.path !== requested) return;
         if (!shadow.adoptedStyleSheets.includes(sheet)) {
           shadow.adoptedStyleSheets = [...shadow.adoptedStyleSheets, sheet];
         }

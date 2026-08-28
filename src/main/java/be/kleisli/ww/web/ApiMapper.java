@@ -1,6 +1,5 @@
 package be.kleisli.ww.web;
 
-import be.kleisli.ww.generated.types.Diff;
 import be.kleisli.ww.generated.types.FileStatus;
 import be.kleisli.ww.generated.types.FileVersions;
 import be.kleisli.ww.generated.types.GitSnapshot;
@@ -10,7 +9,6 @@ import be.kleisli.ww.generated.types.Source;
 import be.kleisli.ww.git.GitService;
 import be.kleisli.ww.proc.ProcessTreeService;
 import java.util.List;
-import java.util.Map;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
@@ -25,7 +23,11 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public class ApiMapper {
 
-  private final ObjectMapper objectMapper = new ObjectMapper();
+  private final ObjectMapper objectMapper;
+
+  public ApiMapper(ObjectMapper objectMapper) {
+    this.objectMapper = objectMapper;
+  }
 
   public GitSnapshot toGitSnapshot(GitService.Snapshot snapshot) {
     return GitSnapshot.newBuilder()
@@ -73,14 +75,6 @@ public class ApiMapper {
         .working(versions.working())
         .binary(versions.binary())
         .tooLarge(versions.tooLarge())
-        .build();
-  }
-
-  public Diff toDiff(Map<String, String> diff) {
-    return Diff.newBuilder()
-        .path(diff.get("path"))
-        .staged(diff.get("staged"))
-        .unstaged(diff.get("unstaged"))
         .build();
   }
 

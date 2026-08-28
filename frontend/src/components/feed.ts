@@ -78,6 +78,11 @@ export class Feed extends LitElement {
   private readonly log = new EventLogController<Event>(this, EventsDocument, MAX_EVENTS);
   private stuckToBottom = true;
 
+  // Filtering runs on every render, and render runs once per animation frame. Recomputing over
+  // MAX_EVENTS items each time is exactly the per-frame work the batching exists to avoid, so the
+  // result is cached against the two inputs that can change it.
+  private cache: { items: Event[]; hidden: Set<Source>; result: Event[] } | null = null;
+
   constructor() {
     super();
     this.hidden_ = new Set();
@@ -102,8 +107,20 @@ export class Feed extends LitElement {
     if (list) list.scrollTop = list.scrollHeight;
   }
 
+  private visibleEvents(): Event[] {
+    if (this.cache && this.cache.items === this.log.items && this.cache.hidden === this.hidden_) {
+      return this.cache.result;
+    }
+    const result =
+      this.hidden_.size === 0
+        ? this.log.items
+        : this.log.items.filter((event) => !this.hidden_.has(event.source));
+    this.cache = { items: this.log.items, hidden: this.hidden_, result };
+    return result;
+  }
+
   render() {
-    const visible = this.log.items.filter((event) => !this.hidden_.has(event.source));
+    const visible = this.visibleEvents();
     return html`
       <h2>
         Activity

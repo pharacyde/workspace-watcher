@@ -41,7 +41,7 @@ public class TranscriptTailService {
 
   private final WatcherProperties props;
   private final EventBus bus;
-  private final ObjectMapper mapper = new ObjectMapper();
+  private final ObjectMapper mapper;
 
   /** Byte offset consumed so far, per transcript file. */
   private final Map<Path, Long> offsets = new HashMap<>();
@@ -55,9 +55,10 @@ public class TranscriptTailService {
         }
       };
 
-  public TranscriptTailService(WatcherProperties props, EventBus bus) {
+  public TranscriptTailService(WatcherProperties props, EventBus bus, ObjectMapper mapper) {
     this.props = props;
     this.bus = bus;
+    this.mapper = mapper;
   }
 
   /**

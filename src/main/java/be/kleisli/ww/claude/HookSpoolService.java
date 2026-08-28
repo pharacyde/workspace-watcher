@@ -41,11 +41,12 @@ public class HookSpoolService {
 
   private final WatcherProperties props;
   private final EventBus bus;
-  private final ObjectMapper mapper = new ObjectMapper();
+  private final ObjectMapper mapper;
 
-  public HookSpoolService(WatcherProperties props, EventBus bus) {
+  public HookSpoolService(WatcherProperties props, EventBus bus, ObjectMapper mapper) {
     this.props = props;
     this.bus = bus;
+    this.mapper = mapper;
   }
 
   @Scheduled(fixedDelayString = "${watcher.spool-poll-ms:200}")
