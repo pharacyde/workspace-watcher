@@ -50,12 +50,18 @@ attribution is real or absent.
 - Git on the `PATH`
 - macOS (Linux works apart from the process panel — see [BACKLOG.md](BACKLOG.md), P9-05)
 
+Node is *not* required to run a release: the frontend is built into the jar. It is downloaded
+automatically by the Maven build if you build from source.
+
 ## Quick start
 
 ```bash
 mvn -DskipTests package
 java -jar target/workspace-watcher-0.1.0-SNAPSHOT.jar --watcher.workspace=/path/to/your/project
 ```
+
+`mvn package` builds both halves: Maven downloads a pinned node, runs the frontend build, and packs
+the result into the jar. Use `-DskipFrontend` to build the backend alone.
 
 Open <http://127.0.0.1:8080>. Then, in your own terminal, `cd` to that project and start Claude Code
 as you normally would. The schema explorer sits at <http://127.0.0.1:8080/graphiql>.
@@ -183,6 +189,38 @@ Stated plainly, because a monitoring tool that overstates its coverage is worse 
   can POST to the hook endpoint.
 - **Events are in memory.** A restart loses history. Persistence is [P9-01](BACKLOG.md).
 
+## Developing
+
+The dashboard reloads itself while you edit it:
+
+```bash
+java -jar target/workspace-watcher-0.1.0-SNAPSHOT.jar --watcher.workspace=/path/to/project   # 8080
+cd frontend && npm run dev                                                                    # 5173
+```
+
+Open <http://127.0.0.1:5173>. Vite serves the UI with hot module replacement and proxies both
+`/graphql` and its WebSocket to the backend on 8080, so the app talks to a same-origin `/graphql`
+in development and in production alike — no environment switch anywhere in the code.
+
+`npm run codegen:watch` regenerates the TypeScript types whenever the schema changes.
+
+### The schema is the contract
+
+`src/main/resources/graphql/schema.graphqls` is the single source of truth, and both sides are
+generated from it:
+
+- **Java** — the DGS codegen Maven plugin generates `be.kleisli.ww.generated.types` at build time.
+  `ApiMapper` maps domain records onto those types, so a field renamed in the schema breaks
+  compilation instead of silently returning null.
+- **TypeScript** — `graphql-codegen` with the client preset generates types *and* checks every
+  query in the frontend against the schema. A renamed field fails `npm run build` rather than
+  showing up as `undefined` in the browser.
+
+### Style
+
+Java is formatted with `google-java-format` through Spotless. `mvn spotless:apply` formats; the
+build fails on anything unformatted, so style never becomes review chatter.
+
 ## Architecture
 
 ```
@@ -192,15 +230,33 @@ be.kleisli.ww
 ├── fs       WorkspaceScanService (layer 2)
 ├── git      GitService — shells out to git rather than embedding JGit
 ├── proc     ProcessTreeService — lsof + ProcessHandle
-└── web      WatchGraphQlController (queries, subscription, hook mutation), GqlEvent
+└── web      WatchDataFetcher (DGS), ApiMapper (domain → generated wire types)
 ```
 
-The subscription replays the buffered history before going live, so a dashboard opened mid-session
-is never blank. Snapshot and subscription are taken under one lock, and overlap is removed by
-sequence number: a duplicate is cheap, a gap is not.
+The API is Netflix DGS running on Spring for GraphQL — `graphql-dgs-spring-graphql-starter`, not
+the classic DGS starter, which carries its own runtime and has been frozen at 9.2.2. Spring for
+GraphQL does not integrate DGS itself; the integration ships from Netflix's side. Netflix's own
+guidance is that the two programming models should not be mixed in one codebase, so everything here
+is DGS annotations.
 
-The frontend is plain HTML, CSS and JavaScript with no build step and no CDN — including a
-hand-rolled `graphql-transport-ws` client of about sixty lines. It works offline and stays readable.
+The frontend is **Lit** web components in TypeScript, built by Vite. Lit is 5.9 kB gzipped against
+roughly 45 kB for React and DOM libraries, has no virtual DOM to diff on every event, and the whole
+entry bundle comes to 82 kB (25 kB gzipped) — Monaco is code-split and only fetched when a file is
+first opened.
+
+Events arriving from the subscription are batched onto one animation frame rather than rendered
+individually, and the feed is virtualised. Under a real build the bottleneck is never the
+transport; it is the DOM.
+
+There are three subscriptions, and the split between them is what keeps the dashboard readable.
+`events` is a chronicle of things that happened; `gitStatus` and `processTree` are current state and
+emit their present value the moment you subscribe. Mixing the two was the original design, and
+measured at 91% of all events being process snapshots that said nothing — they filled the replay
+buffer and pushed real history out of it.
+
+The `events` subscription replays the buffered history before going live, so a dashboard opened
+mid-session is never blank. Snapshot and subscription are taken under one lock, and overlap is
+removed by sequence number: a duplicate is cheap, a gap is not.
 
 ## Roadmap
 

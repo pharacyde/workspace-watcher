@@ -33,6 +33,13 @@ watcher:
   process-poll-ms: 2000
   history-size: 2000
 
+# DGS loads its own schema and defaults to classpath:schema/**, while Spring Boot and the codegen
+# plugin both use classpath:graphql/**. Point DGS at the same single file so there is exactly one
+# copy of the contract.
+dgs:
+  graphql:
+    schema-locations: classpath*:graphql/**/*.graphql*
+
 logging:
   level:
     be.kleisli.ww: INFO

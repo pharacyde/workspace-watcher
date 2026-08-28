@@ -1,0 +1,26 @@
+{
+  "name": "workspace-watcher-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run codegen && tsc -b && vite build",
+    "preview": "vite preview",
+    "codegen": "graphql-codegen --config codegen.ts",
+    "codegen:watch": "graphql-codegen --config codegen.ts --watch"
+  },
+  "dependencies": {
+    "@lit-labs/virtualizer": "^2.1.0",
+    "graphql": "^17.0.0",
+    "graphql-ws": "^6.1.0",
+    "lit": "^3.3.0",
+    "monaco-editor": "^0.56.0"
+  },
+  "devDependencies": {
+    "@graphql-codegen/cli": "^7.3.0",
+    "@graphql-codegen/client-preset": "^6.1.0",
+    "typescript": "^7.0.0",
+    "vite": "^8.1.0"
+  }
+}

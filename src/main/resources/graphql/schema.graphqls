@@ -28,10 +28,6 @@ enum Source {
   HOOK
   "Raw filesystem change. No actor is known - do not guess one."
   FS
-  "Git working-tree state."
-  GIT
-  "Process tree snapshot. Sampled, therefore incomplete by nature."
-  PROCESS
   "The watcher talking about itself."
   SYSTEM
 }
@@ -64,6 +60,29 @@ type Diff {
   unstaged: String!
 }
 
+"""
+The two sides of a file, for a side-by-side diff view. A unified diff string cannot drive one:
+the editor needs both documents, not a description of their difference.
+"""
+type FileVersions {
+  path: String!
+  "Content at HEAD. Empty for an untracked or newly added file."
+  head: String!
+  "Content on disk right now. Empty for a deleted file."
+  working: String!
+  "True when the content is not text; both sides are then empty."
+  binary: Boolean!
+  "True when the file exceeds the diff size limit; both sides are then empty."
+  tooLarge: Boolean!
+}
+
+"Process tree at a moment in time. Sampled, therefore incomplete by nature."
+type ProcessSnapshot {
+  at: String!
+  total: Int!
+  roots: [ProcessNode!]!
+}
+
 type Status {
   workspace: String!
   workspaceExists: Boolean!
@@ -71,13 +90,16 @@ type Status {
   "Transcript directories being tailed. Empty means nothing will be attributed to an agent."
   transcriptDirs: [String!]!
   git: GitSnapshot!
-  processes: [ProcessNode!]!
+  processes: ProcessSnapshot!
 }
 
 type Query {
   status: Status!
   "Unified diff for one workspace-relative path. Paths outside the workspace are rejected."
   diff(path: String!): Diff!
+
+  "Both sides of a file, for a side-by-side editor. Paths outside the workspace are rejected."
+  fileVersions(path: String!): FileVersions!
   "Most recent events from the in-memory buffer, oldest first."
   recentEvents(limit: Int = 200): [WatchEvent!]!
 }
@@ -95,8 +117,17 @@ type Mutation {
 
 type Subscription {
   """
-  Live event stream. Replays the buffered history first, so a dashboard opened mid-session is
-  never blank, then continues with live events without duplicating any.
+  The chronicle: things that happened, in order. Replays the buffered history first, so a
+  dashboard opened mid-session is never blank, then continues live without duplicating any.
+
+  Deliberately excludes state. Republishing an unchanged process list into a chronological feed
+  is what turns a dashboard into noise - measured at 91% of all events before the split.
   """
   events: WatchEvent!
+
+  "Current working tree. Emits the present value on subscribe, then on every change."
+  gitStatus: GitSnapshot!
+
+  "Current process tree. Emits the present value on subscribe, then on every change."
+  processTree: ProcessSnapshot!
 }

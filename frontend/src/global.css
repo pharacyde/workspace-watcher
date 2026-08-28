@@ -1,0 +1,29 @@
+/*
+ * Document-level only. Everything else lives in each component's shadow styles; these custom
+ * properties are declared on :root precisely so they inherit through the shadow boundary and stay
+ * the single place the palette is defined.
+ */
+:root {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --panel: #161a21;
+  --line: #262c36;
+  --text: #d7dce3;
+  --dim: #7b8494;
+  --accent: #7aa2f7;
+  --add: #6ac47a;
+  --del: #e06c75;
+  --warn: #e5c07b;
+  --hook: #c39bf5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}

@@ -1,0 +1,6 @@
+node_modules/
+# downloaded by frontend-maven-plugin
+node/
+dist/
+src/gql/
+*.tsbuildinfo

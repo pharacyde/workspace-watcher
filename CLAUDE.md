@@ -14,8 +14,16 @@ $JAVA_HOME/bin/java -jar target/workspace-watcher-0.1.0-SNAPSHOT.jar \
     --watcher.workspace=/path/to/observe
 ```
 
-Stack: Spring Boot 4.1.1, Java release 25, Maven, Spring for GraphQL. Compiled with `-Xlint:all`;
-keep the build warning-free.
+Stack: Spring Boot 4.1.1, Java release 25, Maven, Netflix DGS on Spring for GraphQL, Lit + Vite for
+the frontend. Compiled with `-Xlint:all`; keep the build warning-free.
+
+`mvn package` builds both halves - Maven downloads a pinned node and runs the frontend build.
+`-DskipFrontend` skips that. Java is formatted by `mvn spotless:apply` (google-java-format, Google
+style); the build fails on anything unformatted.
+
+While developing the UI, run the backend on 8080 and `cd frontend && npm run dev` on 5173. Vite
+serves with hot module replacement and proxies `/graphql` and its WebSocket to 8080, so the app
+talks to a same-origin `/graphql` in both development and production.
 
 Note Spring Boot 4 ships **Jackson 3**: the package is `tools.jackson.databind`, not
 `com.fasterxml.jackson.databind`. `asText()` and `isTextual()` are deprecated in favour of
@@ -56,6 +64,29 @@ be.kleisli.ww
 Frontend lives in `src/main/resources/static/` and is deliberately plain HTML/CSS/JS: no build step,
 no CDN, works offline.
 
+## Frontend
+
+Lit web components in TypeScript, built by Vite into `src/main/resources/static`. No React: Lit is
+5.9 kB gzipped against roughly 45 kB, has no virtual DOM to diff on every event, and the entry
+bundle is 82 kB (25 kB gzipped) with Monaco code-split.
+
+- **Subscriptions are ReactiveControllers** (`src/api/subscriptions.ts`), so they follow the host
+  element's lifecycle and need no cleanup bookkeeping in components.
+- **Events are batched onto one animation frame.** A build produces thousands of events per second;
+  updating per event spends the whole frame budget on layout. The feed is virtualised for the same
+  reason. The transport is never the bottleneck here - the DOM is.
+- **Monaco needs its stylesheet adopted into the shadow root.** Vite bundles the CSS Monaco's
+  modules import into the *document* stylesheet, which a shadow root cannot see. Without
+  `monacoStyleSheet()` the editor renders unstyled and the panel grows to full content height -
+  measured at 2136 px in a 456 px grid cell. Do not "fix" this by dropping to light DOM; a light-DOM
+  child of a shadow root still cannot see document styles, so it does not help.
+- **Monaco's module specifiers are not the ones in most examples.** The package exports map is
+  `"./*": "./esm/vs/*.js"`, so it is `monaco-editor/editor/editor.worker.js`, never
+  `monaco-editor/esm/vs/...`. Languages are imported individually; importing the package root pulls
+  in every language it ships (4.1 MB against 2.9 MB).
+- **`frontend/.npmrc` pins the public registry** so a corporate mirror, which typically lags npmjs
+  by a patch, cannot make the lockfile unresolvable on someone else's machine.
+
 ## Things that are easy to get wrong
 
 - **Transcript directory naming.** Claude Code maps a working directory to a directory name by
@@ -76,6 +107,13 @@ no CDN, works offline.
 - **The `WORKSPACE_WATCHER_URL` path is for a remote watcher only.** There the body is streamed into
   curl on stdin (payloads exceed `ARG_MAX`), `--max-time` is tight, and one failure trips a
   60-second circuit breaker so a stalled watcher cannot tax every subsequent call.
+- **DGS looks for its schema in `classpath:schema/**`** while Spring Boot and the codegen plugin
+  use `classpath:graphql/**`. `dgs.graphql.schema-locations` points it at the one real file; without
+  it the context fails with "Parent type Query not found".
+- **json-path is pinned to 3.0.0.** DGS 12 wires `Jackson3JsonProvider`, which first ships there,
+  while Spring Boot 4.1.1 manages 2.10.0. Without the override the context fails to start.
+- **Do not mix DGS and Spring for GraphQL annotations.** Netflix's own guidance is explicit that
+  some features do not work across both models. Everything here is DGS.
 - **`lsof +D` is a trap.** It walks the entire tree on every call. `lsof -a -d cwd -F pn` returns all
   processes' working directories in one cheap call; filter in Java.
 - **The subscription must not have a gap.** `EventBus.stream()` snapshots history and registers the
