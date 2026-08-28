@@ -82,7 +82,8 @@ the live feed is a `graphql-ws` subscription on the same path.
            git { branch files { path status } }
            processes { pid command children { pid command } } } }
 
-query { diff(path: "src/main/java/be/kleisli/ww/git/GitService.java") { staged unstaged } }
+query { fileVersions(path: "src/main/java/be/kleisli/ww/git/GitService.java") {
+          head working binary tooLarge } }
 
 subscription { events { seq ts source type summary path agent sessionId detail } }
 ```
