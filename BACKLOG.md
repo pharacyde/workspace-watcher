@@ -260,6 +260,11 @@ terugblik op een uur is "hier hield ik hem tegen en dit zei ik erbij" waardevoll
 eromheen.*
 
 **P10-05 Contextvulling en compaction** 🟢
+*Noot bij een tweede lijst: dit wordt elders "context window heatmap" genoemd met de aanname dat
+Claude Code bij een volle context overgaat op FIM (fill-in-the-middle). Dat klopt niet — het
+compacteert, en dat laat een ander spoor na in het transcript. De vraag eronder is wel de goede: aan
+een agent die minder scherp reageert is nu niet te zien dat hij net samengevat is.*
+
 *Een sessie verloor 909.061 tokens context in één keer en niets in het dashboard zei dat.
 `system`/`subtype: compact_boundary` draagt `compactMetadata` met `trigger`, `preTokens`,
 `postTokens` en `durationMs`. De vulling zelf is per beurt af te leiden uit velden die al geparsed
@@ -396,6 +401,78 @@ vaakst geraakt zijn. Aantrekkelijk en grotendeels een presentatielaag over P11-0
 de verleiding groot is er een samenvatting in natuurlijke taal van te maken, en dit project heeft
 geen model in de lus — een verzonnen samenvatting is precies de fout waartegen de rest gebouwd is.
 Tellen en groeperen kan wel, en is waarschijnlijk genoeg.*
+
+---
+
+## Epic 13 — Uit een tweede Gemini-lijst, nagekeken
+
+*Tien suggesties. Twee zijn al gebouwd, drie stonden er al, en van de rest klopt de richting maar
+niet de omschrijving. Hieronder alleen wat overblijft, met de correctie erbij — dezelfde behandeling
+als de oorspronkelijke lijst kreeg.*
+
+**Al gebouwd, geen item nodig.** *"Interactive Guard Policies: waarschuw of blokkeer wanneer een
+subagent bestanden buiten de workspace aanpast, of wanneer `rm -rf` wordt aangeroepen" beschrijft
+`GuardService` zoals die vandaag draait. `denyOutsideWorkspace` bestaat als schakelaar,
+`rm -rf /` staat als DENY-regel en `git push --force` als WARN, naast regels voor `.ssh`, `.pem`,
+`id_rsa*`, `.aws/credentials` en `.env`. En "dry-run" is niet iets om toe te voegen: het is de
+standaard — met de guard uit downgradet `check()` een DENY naar WARN, wat als invariant 1b vastligt
+omdat "uit" moet betekenen dat de hook niet kan blokkeren, niet dat de tekst anders luidt.*
+
+**Al op de backlog.** *"Human-in-the-Loop Approval" is P8-02. "Context Window Heatmap" is P10-05 —
+met één correctie: Claude Code doet geen FIM (fill-in-the-middle) als het vol raakt, het compacteert,
+en dat is een ander verschijnsel met een ander signaal in het transcript. "Token-Efficiency per
+commit" is P11-05. "Time-Travel Diff Replay" is grotendeels P10-09, maar de vorm die daar voorgesteld
+wordt is beter dan wat er stond: scrubben met de tijdlijnslider en het bestand in Monaco zien zoals
+het op dát moment was, in plaats van een undo-knop per bewerking. De gegevens liggen er al —
+`~/.claude/file-history/<sessionId>/<hash>@vN` met `backupTime` — dus dat is een UI-keuze, geen
+nieuwe bron.*
+
+**P13-01 Stamboom van subagents** 🟢
+*Het beste voorstel uit de lijst, en sinds vanavond exact te bouwen. `agent-<id>.meta.json` draagt
+`parentAgentId`, `agentType`, `spawnDepth` en `toolUseId` — hier gemeten met `spawnDepth: 2`, dus
+agents die op hun beurt agents starten komen echt voor. Daarmee is de boom niet af te leiden maar
+letterlijk opgeschreven: geen heuristiek nodig. Per knoop is bekend wat hij deed (zijn eigen
+transcript), wat hij kostte (P10-10 telt zijn tokens al mee) en hoe lang hij bezig was. De feed toont
+subagents nu als losse rijen met een chip, wat de vorm van het werk verbergt: welke tak vastliep,
+welke tak het duurst was.*
+
+**P13-02 Herhaald falen en retry-lussen** 🟢
+*Goed idee onder een verkeerde naam: "hallucinatie-tracker" meet iets anders dan wat hier
+waarneembaar is. Wat wél waarneembaar is: dezelfde `Edit` op hetzelfde bestand kort achter elkaar,
+of een reeks `TOOL_ERROR`-events op dezelfde opdracht. Dat is herhaling en falen, niet hallucinatie,
+en dat onderscheid hoort in de naam te staan — een dashboard dat beweert hallucinaties te zien
+verzint een oordeel dat het niet kan onderbouwen, en dat is de fout waartegen dit hele project
+gebouwd is. De gegevens zijn er: `path`, `type` en `TOOL_ERROR` staan in de tabel en de
+rij-samenvouwing van vanavond doet feitelijk al de helft van het werk. Let op de valse positief:
+drie keer hetzelfde bestand bewerken is ook gewoon hoe iemand een refactor doet.*
+
+**P13-03 MCP-diagnostiek per server** 🟢
+*Grotendeels een groepering van twee items die er al staan: duur per tool-call (P10-03) en afgebroken
+of afgewezen calls (P10-06), gesorteerd op `mcpServer` — dat veld ligt er al en wordt al getoond. De
+vraag die het beantwoordt is echt en wordt nu niet beantwoord: ligt de traagheid bij Claude of bij de
+integratie. Klein bovenop die twee, maar niet zinvol daarvoor.*
+
+**P13-04 Guard-regels bewerken vanuit het dashboard** 🟢
+*Wat er van "Interactive Guard Policies" wél overblijft. De regels komen nu uit een configuratie­-
+bestand; ze zijn niet te zien of te wijzigen zonder een editor en een herstart. Zichtbaar maken welke
+regels gelden en wat ze de afgelopen tijd geraakt hebben is het meeste van de waarde, en dat is
+lezen. Schrijven vanuit het dashboard raakt invariant 1: alles wat een agent kan ophouden moet
+expliciet aangezet worden, een eigen hook hebben en fail-open zijn — de guard voldoet daaraan, een
+knop die hem strenger zet mag dat niet stilletjes ondermijnen.*
+
+**P13-05 Iets meegeven aan een lopende sessie** 🟡
+*"Push extra documentatie of een instructie in de actieve sessie" kan, maar niet zoals beschreven.
+Er is geen ingang om op een willekeurig moment iets een sessie in te duwen; wat er wel is, is
+`additionalContext` — een hook mag bij `UserPromptSubmit` en `PreToolUse` tekst teruggeven die in
+Claude's context terechtkomt. Het verschil is wezenlijk: je kunt niet duwen, je kunt alleen antwoorden
+op het eerstvolgende moment dat de agent langskomt. Voor "ik zie hem de verkeerde kant op gaan" is
+dat meestal snel genoeg, want de volgende tool-call komt binnen seconden.*
+
+*🟡 om twee redenen. Ten eerste raakt dit invariant 1 harder dan wat dan ook op deze lijst: dit is
+per definitie de agent beïnvloeden, dus het vraagt dezelfde behandeling als `GuardService` — uit
+tenzij expliciet aangezet, eigen hook, strakke timeout, fail-open. Ten tweede verandert het wat deze
+app ís. Alles hierboven is observatie; dit is sturing, en dat hoort een bewuste keuze te zijn en geen
+feature die er ongemerkt bij komt.*
 
 ---
 
