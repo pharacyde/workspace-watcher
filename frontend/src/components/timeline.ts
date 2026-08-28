@@ -95,6 +95,9 @@ export class Timeline extends LitElement {
    */
   private dragOrigin = 0;
 
+  /** Epoch ms the drawn chart starts at, updated on every refresh. */
+  private windowStart = Date.now();
+
   private timer?: number;
   /** Only the newest refresh may write. Toggling twice quickly started two, and the slower one
    * finished last and overwrote the other's series with an empty one. */
@@ -225,6 +228,9 @@ export class Timeline extends LitElement {
     const generation = ++this.generation;
     const until = new Date();
     const since = new Date(until.getTime() - this.windowSeconds * 1000);
+    // What the left edge of the drawn chart means, kept so a selection can be redrawn against the
+    // picture it was made on rather than against the clock.
+    this.windowStart = since.getTime();
     const range = { since: since.toISOString(), until: until.toISOString(), buckets: BUCKETS };
     // Dense from the start. Assigning only the buckets that came back leaves holes, and a hole
     // spreads into Math.max as undefined, which makes the peak NaN - and NaN > 0 is false, so the
@@ -320,11 +326,20 @@ export class Timeline extends LitElement {
     );
   }
 
+  /** The selection in clock time, which is what it actually means. */
+  private selectionFrom = 0;
+  private selectionUntil = 0;
+
   private startPick = (event: PointerEvent) => {
+    // Primary button only. pointerdown fires for every button, so a right-click meant for the
+    // context menu used to capture the pointer and drop the feed out of live into replay.
+    if (event.button !== 0) return;
     // Captured, so a drag that leaves the chart - which is most of them, the chart is 100px tall -
     // keeps reporting instead of stopping wherever the pointer crossed the edge.
     (event.currentTarget as SVGElement).setPointerCapture(event.pointerId);
-    this.dragOrigin = Date.now();
+    // Anchored to the chart as drawn, not to the clock: refresh() redraws every five seconds, and a
+    // band placed against a moving clock slides off the data it was drawn around.
+    this.dragOrigin = this.windowStart;
     this.selected = this.bucketAt(event);
     this.selectedEnd = this.selected;
   };
@@ -334,19 +349,32 @@ export class Timeline extends LitElement {
     this.selectedEnd = this.bucketAt(event);
   };
 
+  /**
+   * Drops a selection that never finished.
+   *
+   * <p>A cancelled drag - a touch gesture the browser takes over, or the chart being replaced when
+   * a refresh finds nothing to draw - never delivers pointerup, so the band and "back to live"
+   * would stay on screen announcing a replay that was never dispatched.
+   */
+  private cancelPick = () => {
+    this.selected = null;
+    this.selectedEnd = null;
+  };
+
   private endPick = (event: PointerEvent) => {
     if (this.selected === null) return;
     this.selectedEnd = this.bucketAt(event);
     const lo = Math.min(this.selected, this.selectedEnd);
     const hi = Math.max(this.selected, this.selectedEnd);
-    const start = this.dragOrigin - this.windowSeconds * 1000;
     // hi + 1: the range covers the last bucket rather than stopping where it begins. Without it a
     // click - where lo and hi are the same - would ask for a window of zero length.
+    this.selectionFrom = this.dragOrigin + lo * this.bucketSeconds * 1000;
+    this.selectionUntil = this.dragOrigin + (hi + 1) * this.bucketSeconds * 1000;
     this.dispatchEvent(
       new CustomEvent('replay-range', {
         detail: {
-          since: new Date(start + lo * this.bucketSeconds * 1000).toISOString(),
-          until: new Date(start + (hi + 1) * this.bucketSeconds * 1000).toISOString(),
+          since: new Date(this.selectionFrom).toISOString(),
+          until: new Date(this.selectionUntil).toISOString(),
         },
         bubbles: true,
         composed: true,
@@ -354,24 +382,47 @@ export class Timeline extends LitElement {
     );
   };
 
+  /** The selection as clock times, whether it is still being dragged or already dispatched. */
+  private selectionTimes(): { from: number; until: number } | null {
+    if (this.selected === null || this.selectedEnd === null) return null;
+    const lo = Math.min(this.selected, this.selectedEnd);
+    const hi = Math.max(this.selected, this.selectedEnd);
+    return {
+      from: this.dragOrigin + lo * this.bucketSeconds * 1000,
+      until: this.dragOrigin + (hi + 1) * this.bucketSeconds * 1000,
+    };
+  }
+
   /**
    * The selection: a band for a dragged range, a line for a single bucket.
    *
-   * <p>Drawn as one shape rather than two edges, because the question a range answers is "what
-   * happened in here" and an outline leaves the reader to hold the inside in their head.
+   * <p>Placed from clock times against the chart as it is drawn now, not from the bucket numbers it
+   * was dragged over. The chart is refetched every five seconds and scrolls left, so fixed bucket
+   * coordinates slide off the data they were drawn around: select 13:30-13:40, wait five minutes,
+   * and the band sits over 13:35-13:45 while the label still says 13:30 - a picture and a caption
+   * contradicting each other, which is the failure this project is built against.
+   *
+   * <p>Mapped the way bucketAt reads: the width divided into BUCKETS slots rather than BUCKETS - 1
+   * gaps, so the shape and the range that was dispatched are one statement instead of two that
+   * nearly agree.
    */
   private selectionShape() {
-    if (this.selected === null || this.selectedEnd === null) return '';
-    const scale = 100 / (BUCKETS - 1);
-    const lo = Math.min(this.selected, this.selectedEnd);
-    const hi = Math.max(this.selected, this.selectedEnd);
-    if (lo === hi) {
+    const times = this.selectionTimes();
+    if (!times) return '';
+    const slot = 100 / BUCKETS;
+    const bucketMs = this.bucketSeconds * 1000;
+    const lo = (times.from - this.windowStart) / bucketMs;
+    const hi = (times.until - this.windowStart) / bucketMs;
+    // Scrolled out of the window: drawing it clamped to the edge would claim a selection over data
+    // it no longer covers.
+    if (hi <= 0 || lo >= BUCKETS) return '';
+    const x = Math.max(0, lo) * slot;
+    const width = (Math.min(BUCKETS, hi) - Math.max(0, lo)) * slot;
+    if (width <= slot) {
       return svg`<line class="cursor"
-        x1=${lo * scale} x2=${lo * scale}
-        y1="0" y2=${HEIGHT} vector-effect="non-scaling-stroke" />`;
+        x1=${x} x2=${x} y1="0" y2=${HEIGHT} vector-effect="non-scaling-stroke" />`;
     }
-    return svg`<rect class="range"
-      x=${lo * scale} width=${(hi - lo) * scale} y="0" height=${HEIGHT} />`;
+    return svg`<rect class="range" x=${x} width=${width} y="0" height=${HEIGHT} />`;
   }
 
   /**
@@ -381,16 +432,14 @@ export class Timeline extends LitElement {
    * and a band drawn over a chart of a hundred buckets says nothing about which minutes it is.
    */
   private selectionLabel(): string {
-    if (this.selected === null || this.selectedEnd === null) return '';
-    const lo = Math.min(this.selected, this.selectedEnd);
-    const hi = Math.max(this.selected, this.selectedEnd);
-    const start = this.dragOrigin - this.windowSeconds * 1000;
-    const clock = (bucket: number) =>
-      new Date(start + bucket * this.bucketSeconds * 1000).toLocaleTimeString('en-GB', {
-        hour12: false,
-      });
-    return lo === hi ? clock(lo) : `${clock(lo)} – ${clock(hi + 1)}`;
+    const times = this.selectionTimes();
+    if (!times) return '';
+    const clock = (ms: number) => new Date(ms).toLocaleTimeString('en-GB', { hour12: false });
+    return times.until - times.from <= this.bucketSeconds * 1000
+      ? clock(times.from)
+      : `${clock(times.from)} – ${clock(times.until)}`;
   }
+
 
   private goLive() {
     this.selected = null;
@@ -451,6 +500,7 @@ export class Timeline extends LitElement {
                 @pointerdown=${this.startPick}
                 @pointermove=${this.extendPick}
                 @pointerup=${this.endPick}
+                @pointercancel=${this.cancelPick}
               >
                 ${SERIES.filter((s) => this.enabled.has(s.id)).map((s) => this.line(s))}
                 ${this.selectionShape()}

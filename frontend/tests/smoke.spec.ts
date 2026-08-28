@@ -138,28 +138,49 @@ test.describe('workspace-watcher dashboard', () => {
   test.beforeAll(async ({ browser }) => {
     expect(WORKSPACE, 'WW_WORKSPACE must name the directory the watcher is observing').not.toBe('');
 
+    // Emptied here, not just declared once. Serial mode re-runs this whole block on a retry against
+    // the same workspace and the same running watcher, so anything collected in the first attempt
+    // would still be here and would fail the retry on the first attempt's evidence.
+    consoleErrors.length = 0;
+    pageErrors.length = 0;
+
     // A git repository, so the working tree panel has something to list and the diff panel has two
     // sides to show. The scanner ignores .git, and GitService re-reads the repository on any scan
     // that found a change, so creating it after the watcher started is fine.
     await run('git', ['init', '-q'], { cwd: WORKSPACE });
     await writeFile(join(WORKSPACE, 'tracked.txt'), 'committed line\n');
     await run('git', ['add', 'tracked.txt'], { cwd: WORKSPACE });
-    await run(
-      'git',
-      // Configured on the command line rather than in the repository: the machine running this may
-      // have no global identity, and a failing commit would look like a UI bug.
-      [
-        '-c',
-        'user.name=smoke',
-        '-c',
-        'user.email=smoke@example.invalid',
-        'commit',
-        '-q',
-        '-m',
-        'initial',
-      ],
-      { cwd: WORKSPACE },
-    );
+
+    // Only when there is something to commit. Serial mode re-runs this block on a retry against the
+    // same workspace, where the file is already committed at exactly this content; git then exits 1
+    // with "nothing to commit" and the block fails on an error that says nothing about why the
+    // retry was needed. `diff --cached --quiet` exits 0 when nothing is staged, which is the case
+    // to skip.
+    let staged = true;
+    try {
+      await run('git', ['diff', '--cached', '--quiet'], { cwd: WORKSPACE });
+      staged = false;
+    } catch {
+      staged = true;
+    }
+    if (staged) {
+      await run(
+        'git',
+        // Identity on the command line rather than in the repository: the machine running this may
+        // have none configured, and a failing commit would look like a UI bug.
+        [
+          '-c',
+          'user.name=smoke',
+          '-c',
+          'user.email=smoke@example.invalid',
+          'commit',
+          '-q',
+          '-m',
+          'initial',
+        ],
+        { cwd: WORKSPACE },
+      );
+    }
 
     page = await browser.newPage();
     page.on('console', (message) => {
@@ -225,6 +246,35 @@ test.describe('workspace-watcher dashboard', () => {
         .toBeLessThan(8);
       expect(await buttonLabel('follow')).toBe('⤓ follow');
     }
+  });
+
+  test('scrolling up by hand stops following, and the view stays where it was put', async () => {
+    await setFollow(true);
+    await setWrap(false);
+
+    // The gap this suite did not cover, and a regression walked straight through it: re-pinning on
+    // the virtualizer's rangeChanged put the view back at the bottom after every wheel notch, so
+    // the feed could not be scrolled by hand at all - measured at five notches for zero pixels.
+    // wheel fires before the browser scrolls, so anything reading the position here still sees the
+    // bottom; the direction is the only honest signal at that moment.
+    const list = page.locator('ww-feed lit-virtualizer');
+    const box = await list.boundingBox();
+    expect(box, 'the feed should have a box to scroll in').not.toBeNull();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.wheel(0, -400);
+
+    await expect
+      .poll(async () => buttonLabel('follow'), { message: 'scrolling up should stop following' })
+      .toBe('⤓ follow off');
+
+    // And it has to stay put: a new row arriving must not yank the reader back down.
+    const where = (await feedMetrics()).scrollTop;
+    const before = await feedCount();
+    await writeBatch('zeta', 5);
+    await waitForNewEvents(before);
+    expect(Math.abs((await feedMetrics()).scrollTop - where)).toBeLessThan(8);
+
+    await setFollow(true);
   });
 
   test('toggling wrap does not break following', async () => {

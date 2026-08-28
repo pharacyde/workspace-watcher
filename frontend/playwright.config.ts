@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -20,8 +20,8 @@ const port = Number(process.env.WW_E2E_PORT ?? 18099);
  * A workspace of its own, and a Claude home of its own.
  *
  * <p>Nothing here may touch the developer's real ~/.claude — the Java tests hold the same line.
- * Pointing claude-home at an empty directory also means the workspace register is empty, so nothing
- * can adopt a different project halfway through a test.
+ * That takes four overrides, not three: the spool has its own default under ~/.claude and does not
+ * follow claude-home, and the hook drain deletes what it finds there.
  */
 /*
  * Decided once and passed down through the environment, not computed here.
@@ -45,7 +45,27 @@ process.env.WW_WORKSPACE = workspace;
 // fileURLToPath rather than import.meta.dirname: the latter needs a recent node, and this config is
 // the one file that has to load before anything can tell you why it did not.
 const repo = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
-const jar = join(repo, 'target', 'workspace-watcher-0.1.0-SNAPSHOT.jar');
+/**
+ * The packaged jar, found rather than named.
+ *
+ * <p>A hardcoded version stops matching the day someone edits pom.xml, and the only symptom is
+ * "was not able to start" - the same unhelpful failure findJava below was written to avoid.
+ */
+function findJar(): string {
+  const target = join(repo, 'target');
+  const jars = existsSync(target)
+    ? readdirSync(target).filter((name) => name.endsWith('.jar') && !name.endsWith('.original.jar'))
+    : [];
+  if (jars.length !== 1) {
+    throw new Error(
+      `Expected exactly one jar in ${target}, found ${jars.length ? jars.join(', ') : 'none'}. ` +
+        'Run `mvn -DskipTests package` first: the test drives whatever bundle the jar contains.',
+    );
+  }
+  return join(target, jars[0]);
+}
+
+const jar = findJar();
 /** The lowest JDK the jar's class files can run on. */
 const MINIMUM_JDK = 25;
 
@@ -137,6 +157,11 @@ export default defineConfig({
       `--watcher.claude-home=${claudeHome}`,
       `--watcher.database=${join(root, 'state', 'events.db')}`,
       `--watcher.keystore=${join(root, 'absent.p12')}`,
+      // The spool defaults to ~/.claude/workspace-watcher-spool and does not follow claude-home,
+      // so without this the test watcher reads - and drains, deleting files - the real one. The
+      // register is filled from the spool, not from claude-home, so this is also what actually
+      // keeps a real project from being adopted mid-test.
+      `--watcher.spool=${join(root, 'spool')}`,
     ]
       .map((part) => `"${part}"`)
       .join(' '),

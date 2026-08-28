@@ -92,8 +92,20 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
   leaves the page highlighted. The window is relative to now, so the origin is captured at
   pointerdown - reading the clock again at the end maps the two ends from different instants and
   hands back a range off by however long the drag took.
+- **A timeline selection is stored as clock times, not bucket numbers.** The chart is refetched
+  every five seconds and scrolls left, so a band held at fixed bucket coordinates slides off the
+  data it was drawn around - select 13:30-13:40 and five minutes later it covers 13:35-13:45 while
+  the label still says 13:30. Place it from the times against the window as currently drawn.
 - **Timeline refreshes are generation-guarded.** Toggling twice quickly starts two refreshes, and
   the slower one finishing last overwrote the other's series with an empty one.
+- **Wheel and key handlers must read intent, not position.** They fire *before* the browser
+  scrolls, so at the bottom the measurement still says "at the bottom" and following survives the
+  notch. That was harmless until re-pinning on `rangeChanged` closed the window: measured, five
+  notches up moved `scrollTop` by nothing at all and the feed could not be scrolled back by hand.
+  `deltaY < 0`, ArrowUp/PageUp/Home. Touch has no trustworthy direction, so that one still measures.
+- **Do not guard the re-pin by comparing against where you last pinned.** It looks safer and is
+  wrong: changing every row's height moves `scrollTop` by itself, because the browser keeps the
+  reader's anchor, so a wrap toggle read as "a person scrolled" and switched following off.
 - **Following the tail listens for wheel/touch/key, never for `scroll`.** A scroll event cannot say
   whose scroll it was: assigning `scrollTop` fires one, and measuring a layout the virtualizer was
   still growing made an earlier version decide "not at the bottom" and switch following off

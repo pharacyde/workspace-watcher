@@ -273,14 +273,32 @@ export class Feed extends LitElement {
    * virtualizer was still growing made an earlier version conclude "not at the bottom" and switch
    * following off permanently - one row in, and the feed silently stopped following.
    */
-  private onUserScroll = () => {
+  private onUserScroll = (event: Event) => {
     if (!this.follow) return;
+    // Intent, not position. wheel and keydown both fire before the browser has scrolled, so at the
+    // bottom the measurement still reads a gap of zero and follow survives - it used to take a
+    // second notch to notice. That window was harmless until re-pinning on rangeChanged closed it
+    // for good: measured, five notches up moved scrollTop by nothing at all and the feed could no
+    // longer be scrolled back by hand. Scrolling up is a request to stop following, and that is
+    // readable at the moment it is asked.
+    if (event instanceof WheelEvent) {
+      if (event.deltaY < 0) this.follow = false;
+      return;
+    }
+    if (event instanceof KeyboardEvent) {
+      if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) this.follow = false;
+      return;
+    }
+    // A touch drag carries no direction worth trusting, so this one still measures.
     const list = this.list;
-    if (!list) return;
-    if (list.scrollHeight - list.scrollTop - list.clientHeight > 80) {
+    if (list && list.scrollHeight - list.scrollTop - list.clientHeight > 80) {
       this.follow = false;
     }
   };
+
+  private pin(list: HTMLElement) {
+    list.scrollTop = list.scrollHeight;
+  }
 
   private get list(): (HTMLElement & { layoutComplete?: Promise<void> }) | null {
     return this.renderRoot.querySelector('lit-virtualizer');
@@ -300,7 +318,13 @@ export class Feed extends LitElement {
   private onRangeChanged = () => {
     if (!this.follow || this.replay) return;
     const list = this.list;
-    if (list) list.scrollTop = list.scrollHeight;
+    if (!list) return;
+    // No guard on the position here. Comparing against where we last pinned looked safer and was
+    // measured wrong: changing every row's height moves scrollTop by itself - the browser keeps the
+    // reader's anchor - so a wrap toggle read as "a person scrolled" and switched following off.
+    // Whether the reader wants to follow is answered by onUserScroll at the moment they ask, and by
+    // then this handler is already returning early on `!this.follow`.
+    this.pin(list);
   };
 
   /**
@@ -345,7 +369,7 @@ export class Feed extends LitElement {
     let previous = -1;
     for (let attempt = 0; attempt < 5 && list.scrollHeight !== previous; attempt++) {
       previous = list.scrollHeight;
-      list.scrollTop = list.scrollHeight;
+      this.pin(list);
       await new Promise(requestAnimationFrame);
       if (!this.follow || generation !== this.followGeneration) return;
     }
