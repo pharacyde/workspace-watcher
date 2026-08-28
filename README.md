@@ -80,7 +80,7 @@ the live feed is a `graphql-ws` subscription on the same path.
 ```graphql
 { status { workspace transcriptDirs
            git { branch files { path status } }
-           processes { pid command children { pid command } } } }
+           processes { total roots { pid command children { pid command } } } } }
 
 query { fileVersions(path: "src/main/java/be/kleisli/ww/git/GitService.java") {
           head working binary tooLarge } }
@@ -88,8 +88,11 @@ query { fileVersions(path: "src/main/java/be/kleisli/ww/git/GitService.java") {
 subscription { events { seq ts source type summary path agent sessionId detail } }
 ```
 
-`source` is the field worth reading first: `TRANSCRIPT` and `HOOK` carry real attribution, `FS` and
-`PROCESS` deliberately do not.
+`source` is the field worth reading first: `TRANSCRIPT` and `HOOK` carry real attribution, `FS`
+deliberately does not.
+
+`gitStatus` and `processTree` are separate subscriptions because they are *state*, not events. Each
+emits its current value the moment you subscribe.
 
 `detail` is a JSON string rather than a typed object. Its shape genuinely varies per source, so
 typing it would either lie or drag in a scalar library for a field the UI treats as opaque.
