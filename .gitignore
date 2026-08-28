@@ -26,3 +26,8 @@ src/main/resources/static/
 # Local overrides
 application-local.yml
 *.local.yml
+
+# Playwright output: reports, traces and the temporary workspaces a run creates.
+frontend/playwright-report/
+frontend/test-results/
+frontend/blob-report/

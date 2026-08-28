@@ -287,6 +287,23 @@ export class Feed extends LitElement {
   }
 
   /**
+   * Re-pins to the bottom whenever the virtualizer changes what it has rendered.
+   *
+   * <p>The measurement is what makes this necessary. Rows are measured asynchronously and the total
+   * height grows in stages, so a scroll that was at the bottom stops being at the bottom without
+   * anything else happening - no event, no render, nothing to trigger followTail again. Measured
+   * with wrap on and a hundred and sixty rows: scrollTop sat at 7164 while the height had grown to
+   * 8796, and stayed there. A settle loop cannot fix that, however many rounds it is given: it can
+   * only guess how long measuring will take, and the answer grows with the list. The library says
+   * when it has done more work, so that is what to listen to.
+   */
+  private onRangeChanged = () => {
+    if (!this.follow || this.replay) return;
+    const list = this.list;
+    if (list) list.scrollTop = list.scrollHeight;
+  };
+
+  /**
    * Supersedes an in-flight followTail. updated() fires one per frame while events stream, and the
    * settle loop below spans several frames, so without this they overlap and each one forces its
    * own layout - on exactly the frame budget the batching in this component exists to protect.
@@ -321,6 +338,10 @@ export class Feed extends LitElement {
     // wrap toggle changes every row's height at once, which left the feed hundreds of pixels
     // short of the end. So scroll, let a frame pass, and scroll again until the height settles.
     // Bounded, and it stops on its own as soon as two frames agree.
+    // A few frames of settling for the height the rows already have. Anything measured later is
+    // caught by onRangeChanged instead - a bounded loop here cannot be the answer to that, because
+    // the only bound it can pick is a guess at how long measuring takes, and that grows with the
+    // list.
     let previous = -1;
     for (let attempt = 0; attempt < 5 && list.scrollHeight !== previous; attempt++) {
       previous = list.scrollHeight;
@@ -470,6 +491,7 @@ export class Feed extends LitElement {
                 @wheel=${this.onUserScroll}
                 @touchmove=${this.onUserScroll}
                 @keydown=${this.onUserScroll}
+                @rangeChanged=${this.onRangeChanged}
                 .items=${visible}
                 .renderItem=${(row: Row | undefined) => {
                   // The virtualizer can ask for an index the list no longer has, in the frame

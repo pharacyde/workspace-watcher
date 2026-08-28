@@ -118,6 +118,18 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
   hash so they can be cached hard; the file that names them cannot, or a browser keeps loading an
   old bundle after a rebuild — which is indistinguishable from a broken feature and cost one real
   bug report that a hard refresh "fixed".
+- **Following re-pins on `rangeChanged`, not only after an event.** The virtualizer measures rows
+  asynchronously and its total height grows in stages, so a scroll that was at the bottom stops
+  being at the bottom with no event and no render to notice it. Measured with wrap on and 160 rows:
+  `scrollTop` sat at 7164 while the height had reached 8796, and stayed there. A settle loop cannot
+  fix this however many rounds it gets — the only bound it can pick is a guess at how long measuring
+  takes, and that grows with the list. The library says when it has done more work; listen to that.
+  Found by the browser test on its first run, which is the whole argument for having one.
+- **The Playwright config is evaluated in the runner and again in every worker.** Anything random in
+  it answers differently per process: `mkdtemp` there produced two directories, the runner started
+  the watcher on one and the test wrote its files into the other, and the feed stayed empty for a
+  reason no assertion could describe. Decide once, put it in the environment, let the workers
+  inherit it.
 - **A `<pre>` in a scrolling parent grows instead of scrolling.** `.event-body` is the scroll
   container, so the file view's `<pre>` reached full content height and following it had nothing to
   scroll - the toggle was on and did nothing. The body becomes a flex column and the child gets
@@ -164,6 +176,21 @@ is the regression test for the worst bug so far and should not be deleted.
 
 Fixtures are built in `@TempDir`, including real git repositories. Nothing touches the developer's
 own `~/.claude`.
+
+One Playwright smoke test sits beside those, not among them: `cd frontend && npm run test:e2e`. It
+starts the app from `target/workspace-watcher-0.1.0-SNAPSHOT.jar` over plain HTTP and drives
+Chromium against it, which is the only check that the bundle Vite produced actually boots in a
+browser. Everything above it passes on a bundle that throws on load — a bad module specifier, a
+stylesheet that never reaches the shadow root, a chunk that fails its dynamic import — because none
+of the Java tests ever execute the JavaScript.
+
+**Build the frontend before running it.** The jar has to be the current one: asset names carry a
+content hash and `emptyOutDir` removes the old ones, so a jar built before your change serves a
+different bundle than the one you are testing, and the test measures the previous version while
+looking green. `mvn -DskipTests package` first, or the run means nothing. CI takes the jar the
+JDK 26 build uploaded for exactly that reason, and runs the browser test once on one runner rather
+than in every matrix combination — the bundle does not vary by JDK, and the browser download does
+not need paying for twice.
 
 ## Things that are easy to get wrong
 

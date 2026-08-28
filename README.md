@@ -461,6 +461,9 @@ reframe, or blocked, and why.
 build, and the jar. CI additionally builds on JDK 25 as well as 26, and runs the tests on macOS —
 the platform the process layer is actually written against.
 
+`cd frontend && npm run test:e2e` adds a Playwright smoke test that starts the packaged jar and
+loads the dashboard in Chromium; package first, since it tests whatever bundle the jar contains.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
