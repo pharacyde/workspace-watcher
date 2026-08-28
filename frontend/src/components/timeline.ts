@@ -76,12 +76,24 @@ export class Timeline extends LitElement {
     data: { state: true },
     enabled: { state: true },
     selected: { state: true },
+    selectedEnd: { state: true },
   };
 
   declare private windowSeconds: number;
   declare private data: Record<SeriesId, number[]>;
   declare private enabled: Set<SeriesId>;
   declare private selected: number | null;
+  /** The other end of a dragged range; equal to selected for a single bucket. */
+  declare private selectedEnd: number | null;
+
+  /**
+   * Where the window started when the drag began.
+   *
+   * <p>The window is relative to now, so reading the clock again at the end of a drag would map the
+   * two ends from different instants and hand back a range that is off by however long the drag
+   * took.
+   */
+  private dragOrigin = 0;
 
   private timer?: number;
   /** Only the newest refresh may write. Toggling twice quickly started two, and the slower one
@@ -158,6 +170,20 @@ export class Timeline extends LitElement {
       display: block;
       overflow: visible;
       cursor: crosshair;
+      /* A drag across a chart otherwise starts a text selection, which fights the pointer capture
+         and leaves the page highlighted blue afterwards. */
+      user-select: none;
+    }
+    .span {
+      color: var(--dim);
+      font-variant-numeric: tabular-nums;
+    }
+    .range {
+      fill: var(--accent);
+      fill-opacity: 0.18;
+      stroke: var(--accent);
+      stroke-opacity: 0.5;
+      vector-effect: non-scaling-stroke;
     }
     .cursor {
       stroke: var(--text);
@@ -177,6 +203,7 @@ export class Timeline extends LitElement {
     this.data = { events: [], tokens: [], cpu: [], memory: [] };
     this.enabled = new Set<SeriesId>(['events', 'tokens']);
     this.selected = null;
+    this.selectedEnd = null;
   }
 
   connectedCallback(): void {
@@ -285,28 +312,89 @@ export class Timeline extends LitElement {
     />`;
   }
 
-  private pick(event: MouseEvent) {
+  private bucketAt(event: PointerEvent): number {
     const box = (event.currentTarget as SVGElement).getBoundingClientRect();
-    const index = Math.min(
+    return Math.min(
       BUCKETS - 1,
       Math.max(0, Math.floor(((event.clientX - box.left) / box.width) * BUCKETS)),
     );
-    this.selected = index;
-    const from = new Date(Date.now() - this.windowSeconds * 1000 + index * this.bucketSeconds * 1000);
+  }
+
+  private startPick = (event: PointerEvent) => {
+    // Captured, so a drag that leaves the chart - which is most of them, the chart is 100px tall -
+    // keeps reporting instead of stopping wherever the pointer crossed the edge.
+    (event.currentTarget as SVGElement).setPointerCapture(event.pointerId);
+    this.dragOrigin = Date.now();
+    this.selected = this.bucketAt(event);
+    this.selectedEnd = this.selected;
+  };
+
+  private extendPick = (event: PointerEvent) => {
+    if (this.selected === null || !(event.buttons & 1)) return;
+    this.selectedEnd = this.bucketAt(event);
+  };
+
+  private endPick = (event: PointerEvent) => {
+    if (this.selected === null) return;
+    this.selectedEnd = this.bucketAt(event);
+    const lo = Math.min(this.selected, this.selectedEnd);
+    const hi = Math.max(this.selected, this.selectedEnd);
+    const start = this.dragOrigin - this.windowSeconds * 1000;
+    // hi + 1: the range covers the last bucket rather than stopping where it begins. Without it a
+    // click - where lo and hi are the same - would ask for a window of zero length.
     this.dispatchEvent(
       new CustomEvent('replay-range', {
         detail: {
-          since: from.toISOString(),
-          until: new Date(from.getTime() + this.bucketSeconds * 1000).toISOString(),
+          since: new Date(start + lo * this.bucketSeconds * 1000).toISOString(),
+          until: new Date(start + (hi + 1) * this.bucketSeconds * 1000).toISOString(),
         },
         bubbles: true,
         composed: true,
       }),
     );
+  };
+
+  /**
+   * The selection: a band for a dragged range, a line for a single bucket.
+   *
+   * <p>Drawn as one shape rather than two edges, because the question a range answers is "what
+   * happened in here" and an outline leaves the reader to hold the inside in their head.
+   */
+  private selectionShape() {
+    if (this.selected === null || this.selectedEnd === null) return '';
+    const scale = 100 / (BUCKETS - 1);
+    const lo = Math.min(this.selected, this.selectedEnd);
+    const hi = Math.max(this.selected, this.selectedEnd);
+    if (lo === hi) {
+      return svg`<line class="cursor"
+        x1=${lo * scale} x2=${lo * scale}
+        y1="0" y2=${HEIGHT} vector-effect="non-scaling-stroke" />`;
+    }
+    return svg`<rect class="range"
+      x=${lo * scale} width=${(hi - lo) * scale} y="0" height=${HEIGHT} />`;
+  }
+
+  /**
+   * What the selection covers, in clock time.
+   *
+   * <p>Without it the only clue that a drag landed where it was meant to is the feed's contents,
+   * and a band drawn over a chart of a hundred buckets says nothing about which minutes it is.
+   */
+  private selectionLabel(): string {
+    if (this.selected === null || this.selectedEnd === null) return '';
+    const lo = Math.min(this.selected, this.selectedEnd);
+    const hi = Math.max(this.selected, this.selectedEnd);
+    const start = this.dragOrigin - this.windowSeconds * 1000;
+    const clock = (bucket: number) =>
+      new Date(start + bucket * this.bucketSeconds * 1000).toLocaleTimeString('en-GB', {
+        hour12: false,
+      });
+    return lo === hi ? clock(lo) : `${clock(lo)} – ${clock(hi + 1)}`;
   }
 
   private goLive() {
     this.selected = null;
+    this.selectedEnd = null;
     this.dispatchEvent(
       new CustomEvent('replay-range', { detail: null, bubbles: true, composed: true }),
     );
@@ -333,7 +421,8 @@ export class Timeline extends LitElement {
           `,
         )}
         ${this.selected !== null
-          ? html`<button class="live" @click=${this.goLive}>● back to live</button>`
+          ? html`<span class="span">${this.selectionLabel()}</span>
+              <button class="live" @click=${this.goLive}>● back to live</button>`
           : ''}
         <span class="windows">
           ${WINDOWS.map(
@@ -343,6 +432,7 @@ export class Timeline extends LitElement {
                 @click=${() => {
                   this.windowSeconds = w.seconds;
                   this.selected = null;
+                  this.selectedEnd = null;
                   this.refresh();
                 }}
               >
@@ -355,14 +445,15 @@ export class Timeline extends LitElement {
       <div class="chart">
         ${anything
           ? html`
-              <svg viewBox="0 0 100 ${HEIGHT}" preserveAspectRatio="none" @click=${this.pick}>
+              <svg
+                viewBox="0 0 100 ${HEIGHT}"
+                preserveAspectRatio="none"
+                @pointerdown=${this.startPick}
+                @pointermove=${this.extendPick}
+                @pointerup=${this.endPick}
+              >
                 ${SERIES.filter((s) => this.enabled.has(s.id)).map((s) => this.line(s))}
-                ${this.selected !== null
-                  ? svg`<line class="cursor"
-                      x1=${(this.selected / (BUCKETS - 1)) * 100}
-                      x2=${(this.selected / (BUCKETS - 1)) * 100}
-                      y1="0" y2=${HEIGHT} vector-effect="non-scaling-stroke" />`
-                  : ''}
+                ${this.selectionShape()}
               </svg>
             `
           : html`<p class="empty">nothing recorded in this window</p>`}

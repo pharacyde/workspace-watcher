@@ -86,6 +86,12 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
 - **Notifications must degrade, not fail.** Safari refuses them on a plain http origin, so the
   title badge runs regardless and the button says which you are getting. A feature that works in
   some browsers is worse than one that always does something.
+- **A drag on the chart needs pointer capture and `user-select: none`.** The chart is 54 px tall, so
+  most drags leave it; without capture the selection stops wherever the pointer crossed the edge.
+  Without `user-select: none` the same drag starts a text selection that fights the capture and
+  leaves the page highlighted. The window is relative to now, so the origin is captured at
+  pointerdown - reading the clock again at the end maps the two ends from different instants and
+  hands back a range off by however long the drag took.
 - **Timeline refreshes are generation-guarded.** Toggling twice quickly starts two refreshes, and
   the slower one finishing last overwrote the other's series with an empty one.
 - **Following the tail listens for wheel/touch/key, never for `scroll`.** A scroll event cannot say
