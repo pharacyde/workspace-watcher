@@ -7,6 +7,15 @@ server:
 spring:
   application:
     name: workspace-watcher
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          # The asset filenames carry a content hash, so they can be cached hard. index.html
+          # cannot: it is what points at those filenames, and a browser holding an old copy keeps
+          # loading an old bundle long after a rebuild - which looks exactly like a broken feature.
+          max-age: 31536000
+          cache-public: true
   graphql:
     # GraphQL is the whole API: queries over HTTP POST, the live feed over a graphql-ws
     # subscription. There is no REST surface.

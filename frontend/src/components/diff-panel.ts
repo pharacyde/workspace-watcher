@@ -8,6 +8,47 @@ import { languageFor, loadMonaco, monacoStyleSheet, type DiffEditor } from './mo
 type FeedEvent = EventsSubscription['events'];
 
 /**
+ * Pretty-prints and colours a body that turns out to be JSON, and leaves everything else alone.
+ *
+ * <p>Much of what an agent hands back is JSON on one enormous line - a hook payload, a tool's
+ * arguments - which is technically the whole answer and practically unreadable. Anything that is
+ * not JSON is left exactly as it came: build output and stack traces are already formatted, and
+ * "improving" them would only destroy their alignment.
+ */
+function renderBody(raw: string) {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+    return raw;
+  }
+  let pretty: string;
+  try {
+    pretty = JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return raw;
+  }
+  // Tokenised rather than parsed a second time: this only needs to colour, not to understand.
+  const parts: unknown[] = [];
+  const pattern = /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
+  let last = 0;
+  for (const match of pretty.matchAll(pattern)) {
+    parts.push(pretty.slice(last, match.index));
+    const [text, str, colon, literal, num] = match;
+    if (str && colon) {
+      parts.push(html`<span class="j-key">${str}</span><span>${colon}</span>`);
+    } else if (str) {
+      parts.push(html`<span class="j-str">${str}</span>`);
+    } else if (literal) {
+      parts.push(html`<span class="j-lit">${literal}</span>`);
+    } else {
+      parts.push(html`<span class="j-num">${num}</span>`);
+    }
+    last = match.index + text.length;
+  }
+  parts.push(pretty.slice(last));
+  return parts;
+}
+
+/**
  * One panel, two things to inspect: the diff of a file, or the full record of an event.
  *
  * <p>The feed shows a headline - `Bash $ mvn test`, then `BUILD FAILURE` - and the output behind it
@@ -87,6 +128,18 @@ export class DiffPanel extends LitElement {
         margin: 0;
         color: var(--dim);
       }
+      .j-key {
+        color: var(--accent);
+      }
+      .j-str {
+        color: var(--add);
+      }
+      .j-num {
+        color: var(--warn);
+      }
+      .j-lit {
+        color: var(--hook);
+      }
       /* Off by default: build output and stack traces are column-aligned, and wrapping them
          destroys the alignment that makes them readable. On demand for long single lines. */
       pre.detail.wrap {
@@ -110,20 +163,35 @@ export class DiffPanel extends LitElement {
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
-    this.disposeModels();
+    this.disposeEditor();
+  }
+
+  /**
+   * Detaches the editor from its models before disposing them.
+   *
+   * <p>Order matters and Monaco says so out loud: disposing a model the editor still points at
+   * raises "TextModel got disposed before DiffEditorWidget model got reset". It does not throw
+   * immediately, which is why switching back and forth between a row and a file only broke after
+   * a while.
+   */
+  private disposeEditor() {
+    const model = this.editor?.getModel();
+    this.editor?.setModel(null);
+    model?.original.dispose();
+    model?.modified.dispose();
     this.editor?.dispose();
     this.editor = null;
   }
 
-  private disposeModels() {
-    // setModel does not dispose the previous models; leaking them leaks whole documents.
-    const model = this.editor?.getModel();
-    model?.original.dispose();
-    model?.modified.dispose();
-  }
-
   updated(changed: Map<string, unknown>) {
-    if (!changed.has('path') || this.event) return;
+    if (!changed.has('path') && !changed.has('event')) return;
+    if (this.event) {
+      // Showing an event means the diff container has left the DOM. Holding on to an editor
+      // attached to a detached node is what made returning to the same file show an empty panel:
+      // the path had not changed, so nothing rebuilt, and the fresh container stayed empty.
+      this.disposeEditor();
+      return;
+    }
     if (!this.path) {
       this.message = 'select a row or a file to inspect it';
       return;
@@ -161,12 +229,16 @@ export class DiffPanel extends LitElement {
           scrollBeyondLastLine: false,
         });
 
+        // Attach the new pair first and only then dispose the old one, for the same reason: a
+        // model the editor still references must not be disposed underneath it.
         const language = languageFor(requested);
-        this.disposeModels();
+        const previous = this.editor.getModel();
         this.editor.setModel({
           original: monaco.editor.createModel(fileVersions.head, language),
           modified: monaco.editor.createModel(fileVersions.working, language),
         });
+        previous?.original.dispose();
+        previous?.modified.dispose();
       })
       .catch((error: Error) => {
         if (this.path === requested) this.message = error.message;
@@ -180,11 +252,11 @@ export class DiffPanel extends LitElement {
     } catch {
       detail = null;
     }
-    const body =
+    const raw =
       (detail?.output as string) ??
       (detail?.payload as string) ??
       (detail?.input as string) ??
-      (detail ? JSON.stringify(detail, null, 2) : null);
+      (detail ? JSON.stringify(detail) : null);
 
     return html`
       <div class="meta">
@@ -200,8 +272,8 @@ export class DiffPanel extends LitElement {
           : ''}
       </div>
       <div class="summary">${event.summary}</div>
-      ${body
-        ? html`<pre class="detail ${this.wrap ? 'wrap' : 'nowrap'}">${body}</pre>`
+      ${raw
+        ? html`<pre class="detail ${this.wrap ? 'wrap' : 'nowrap'}">${renderBody(raw)}</pre>`
         : html`<p class="empty">no further detail</p>`}
     `;
   }

@@ -89,6 +89,10 @@ A search box in the header filters **every panel at once** — the activity feed
 the process list. In the process tree a match anywhere in a subtree keeps that subtree, so a hit is
 never orphaned from its parent.
 
+JSON in that output is pretty-printed and coloured — much of what an agent hands back is JSON on
+one enormous line, which is technically the whole answer and practically unreadable. Anything that
+is not JSON is left exactly as it came, because build output and stack traces are already formatted.
+
 Clicking a row opens the event in the fourth panel: the full tool output, not the one-line headline.
 Both the feed and that output have a `wrap` toggle, off by default — build output and stack traces are column-aligned,
 and wrapping them destroys the alignment that makes them readable. Clicking a file in the working

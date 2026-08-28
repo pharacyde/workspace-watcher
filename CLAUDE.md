@@ -88,6 +88,17 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
   it scrolls the nearest scrolling ancestor and setting `scrollTop` on the element does nothing.
   Scroll after awaiting `layoutComplete`; rows are measured asynchronously. Avoid `scrollToIndex` —
   the library documents it as a shim it plans to remove, and it threw on an unlaid-out row.
+- **Detach Monaco from its models before disposing them.** `setModel(null)` first, or attach the
+  new pair first — disposing a model the editor still points at raises "TextModel got disposed
+  before DiffEditorWidget model got reset". It does not throw straight away, which is why it only
+  surfaced after switching back and forth a few times.
+- **Rebuild the editor whenever the panel returns from an event to a diff.** The container is a
+  fresh node by then; guarding only on `path` changing left an editor attached to a detached node
+  and an empty panel for a file that had worked a moment earlier.
+- **`index.html` is served `no-store`, assets `max-age=31536000`.** Asset names carry a content
+  hash so they can be cached hard; the file that names them cannot, or a browser keeps loading an
+  old bundle after a rebuild — which is indistinguishable from a broken feature and cost one real
+  bug report that a hard refresh "fixed".
 - **Monaco needs its stylesheet adopted into the shadow root.** Vite bundles the CSS Monaco's
   modules import into the *document* stylesheet, which a shadow root cannot see. Without
   `monacoStyleSheet()` the editor renders unstyled and the panel grows to full content height -
