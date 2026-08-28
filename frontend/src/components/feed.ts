@@ -1,6 +1,7 @@
 import '@lit-labs/virtualizer';
 import { css, html, LitElement } from 'lit';
-import { EventsDocument, SessionsDocument } from '../api/documents';
+import { request } from '../api/client';
+import { EventsDocument, HistoryDocument, SessionsDocument } from '../api/documents';
 import { EventLogController, LatestController } from '../api/subscriptions';
 import type { EventsSubscription, Source } from '../gql/graphql';
 import { panelStyles } from '../styles';
@@ -27,11 +28,19 @@ function label(source: Source, type: string): string {
 }
 
 export class Feed extends LitElement {
-  static properties = { hidden_: { state: true }, session: { state: true } };
+  static properties = {
+    hidden_: { state: true },
+    session: { state: true },
+    replay: { attribute: false },
+    replayed: { state: true },
+  };
 
   declare private hidden_: Set<Source>;
   /** Empty means every agent in this workspace. */
   declare private session: string;
+  /** Set by the timeline to a recorded window; null means follow the live stream. */
+  declare replay: { since: string; until: string } | null;
+  declare private replayed: Event[];
 
   static styles = [
     panelStyles,
@@ -83,6 +92,12 @@ export class Feed extends LitElement {
       lit-virtualizer {
         height: 100%;
       }
+      .replaying {
+        color: var(--warn);
+        text-transform: none;
+        letter-spacing: 0;
+        font-weight: 400;
+      }
       select {
         background: var(--panel);
         color: var(--text);
@@ -114,6 +129,8 @@ export class Feed extends LitElement {
     super();
     this.hidden_ = new Set();
     this.session = '';
+    this.replay = null;
+    this.replayed = [];
   }
 
   private toggle(source: Source) {
@@ -129,16 +146,31 @@ export class Feed extends LitElement {
     this.stuckToBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }
 
-  updated() {
-    if (!this.stuckToBottom) return;
+  private followTail() {
+    if (!this.stuckToBottom || this.replay) return;
     const list = this.renderRoot.querySelector('lit-virtualizer');
     if (list) list.scrollTop = list.scrollHeight;
   }
 
+  updated(changed: Map<string, unknown>) {
+    this.followTail();
+    if (!changed.has('replay')) return;
+    if (!this.replay) {
+      this.replayed = [];
+      return;
+    }
+    // Recorded events come from the database, not the buffer: the point of scrubbing back is to
+    // reach what the live stream no longer holds.
+    request(HistoryDocument, { ...this.replay, limit: 2000 })
+      .then(({ history }) => (this.replayed = history as Event[]))
+      .catch(() => (this.replayed = []));
+  }
+
   private visibleEvents(): Event[] {
+    const items = this.replay ? this.replayed : this.log.items;
     if (
       this.cache &&
-      this.cache.items === this.log.items &&
+      this.cache.items === items &&
       this.cache.hidden === this.hidden_ &&
       this.cache.session === this.session
     ) {
@@ -147,12 +179,13 @@ export class Feed extends LitElement {
     // Picking one agent hides everything that cannot be attributed to it, filesystem events
     // included: they carry no session, so claiming they belong to the selected one would be a
     // guess of exactly the kind this project refuses to make elsewhere.
-    const result = this.log.items.filter(
+    const source = this.replay ? this.replayed : this.log.items;
+    const result = source.filter(
       (event) =>
         !this.hidden_.has(event.source) &&
         (this.session === '' || event.sessionId === this.session),
     );
-    this.cache = { items: this.log.items, hidden: this.hidden_, session: this.session, result };
+    this.cache = { items: source, hidden: this.hidden_, session: this.session, result };
     return result;
   }
 
@@ -183,8 +216,13 @@ export class Feed extends LitElement {
     const visible = this.visibleEvents();
     return html`
       <h2>
-        Activity
+        ${this.replay ? 'Replay' : 'Activity'}
         <span class="count">${visible.length.toLocaleString()}</span>
+        ${this.replay
+          ? html`<span class="replaying"
+              >${new Date(this.replay.since).toLocaleTimeString('en-GB', { hour12: false })}</span
+            >`
+          : ''}
         ${this.sessionPicker()}
         <span class="filters">
           ${ALL_SOURCES.map(
@@ -207,7 +245,12 @@ export class Feed extends LitElement {
               <lit-virtualizer
                 @scroll=${this.onScroll}
                 .items=${visible}
-                .renderItem=${(event: Event) => html`
+                .renderItem=${(event: Event | undefined) =>
+                  // The virtualizer can ask for an index the list no longer has, in the frame
+                  // where switching between live and replay swaps the array underneath it.
+                  !event
+                    ? html``
+                    : html`
                   <div
                     class="rowline ${event.type === 'TOOL_ERROR' ? 'error' : ''} ${event.source}"
                     style=${event.path ? 'cursor:pointer' : ''}
@@ -228,8 +271,8 @@ export class Feed extends LitElement {
                     <span class="msg ellipsis">
                       ${event.agent ? html`<span class="agent">${event.agent} </span>` : ''}${event.summary}
                     </span>
-                  </div>
-                `}
+                        </div>
+                      `}
               ></lit-virtualizer>
             `}
       </div>

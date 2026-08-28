@@ -127,6 +127,33 @@ export const ProcessTreeDocument = graphql(`
   }
 `);
 
+export const ActivityDocument = graphql(`
+  query Activity($since: String!, $until: String!, $buckets: Int!) {
+    activity(since: $since, until: $until, buckets: $buckets) {
+      index
+      from
+      count
+      agentCount
+    }
+  }
+`);
+
+export const HistoryDocument = graphql(`
+  query History($since: String!, $until: String!, $limit: Int!) {
+    history(since: $since, until: $until, limit: $limit) {
+      seq
+      ts
+      source
+      type
+      summary
+      path
+      agent
+      sessionId
+      detail
+    }
+  }
+`);
+
 export const FileVersionsDocument = graphql(`
   query FileVersions($path: String!) {
     fileVersions(path: $path) {

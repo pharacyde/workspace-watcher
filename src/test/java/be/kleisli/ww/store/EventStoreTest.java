@@ -133,6 +133,42 @@ class EventStoreTest {
   }
 
   @Test
+  @DisplayName("counts activity per bucket and separates agent-caused events")
+  void countsActivity() {
+    Wiring w = open();
+    for (int i = 0; i < 5; i++) {
+      publish(w.bus(), "file " + i);
+    }
+    w.bus()
+        .publish(
+            WatchEvent.of(WatchEvent.Source.TRANSCRIPT, "TOOL_USE")
+                .agent("claude-code")
+                .summary("Bash  $ mvn test"));
+    w.store().flush();
+
+    String since = java.time.Instant.now().minusSeconds(60).toString();
+    String until = java.time.Instant.now().plusSeconds(60).toString();
+    List<EventStore.Bucket> buckets = w.store().activity(null, since, until, 4);
+
+    // A thousand file events during a checkout is noise; the tool call is the story, so the two
+    // are counted apart.
+    assertThat(buckets).isNotEmpty();
+    assertThat(buckets.stream().mapToInt(EventStore.Bucket::count).sum()).isEqualTo(6);
+    assertThat(buckets.stream().mapToInt(EventStore.Bucket::agentCount).sum()).isEqualTo(1);
+  }
+
+  @Test
+  @DisplayName("returns nothing rather than throwing on an unparseable range")
+  void toleratesBadRange() {
+    Wiring w = open();
+    publish(w.bus(), "one");
+    w.store().flush();
+
+    assertThat(w.store().activity(null, "not-a-timestamp", "also-not", 4)).isEmpty();
+    assertThat(w.store().activity(null, null, null, 4)).isEmpty();
+  }
+
+  @Test
   @DisplayName("runs without persistence when no database is configured")
   void disabledWithoutDatabase() {
     props.setDatabase("");

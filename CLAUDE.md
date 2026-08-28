@@ -148,6 +148,10 @@ own `~/.claude`.
   workspace", which orders by id; the (workspace, ts) index cannot serve that ordering. Measured
   over 500k rows: 328ms without it, 1ms with. It costs about 18% of write throughput and 28% of
   disk, which is a trade worth making twice.
+- **The timeline counts in SQL, never in the client.** `activity()` returns a few hundred numbers
+  for what may be millions of rows. Do not "simplify" it into fetching events and counting them.
+- **The timeline draws two densities.** File events dwarf agent events by orders of magnitude, so a
+  single total bar hides exactly what someone opened the dashboard to see.
 - **Recording must never slow a collector.** `EventStore` queues and flushes on a scheduler, and
   drops the newest events if the queue fills rather than blocking. It also subscribes to the bus
   instead of the bus knowing about it, so storage stays invisible to the thing being stored.

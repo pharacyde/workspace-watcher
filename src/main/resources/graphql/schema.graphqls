@@ -160,6 +160,16 @@ type SessionEntry {
   live: Boolean!
 }
 
+"How many events fell in one slice of a timeline, and how many of those an agent caused."
+type ActivityBucket {
+  index: Int!
+  "ISO-8601 instant this slice starts at."
+  from: String!
+  count: Int!
+  "Events from TRANSCRIPT or HOOK. A thousand file events is noise; ten tool calls is the story."
+  agentCount: Int!
+}
+
 type Status {
   "Null until a workspace has been chosen or discovered."
   workspace: String
@@ -183,6 +193,17 @@ type Query {
 
   "Agent sessions in the watched workspace, most recently active first."
   sessions: [SessionEntry!]!
+
+  """
+  Activity density over a range, for a timeline to draw. Counted in the database rather than by
+  returning the rows: a month is millions of events and a timeline needs a few hundred numbers.
+  """
+  activity(
+    workspace: String
+    since: String!
+    until: String!
+    buckets: Int = 240
+  ): [ActivityBucket!]!
 
   "Guard rules, and whether they are being enforced or only observed."
   guard: GuardConfig!

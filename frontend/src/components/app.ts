@@ -11,6 +11,7 @@ import './diff-panel';
 import './feed';
 import './git-panel';
 import './process-panel';
+import './timeline';
 
 export class App extends LitElement {
   static properties = {
@@ -18,12 +19,14 @@ export class App extends LitElement {
     hasTranscripts: { state: true },
     selected: { state: true },
     connection: { state: true },
+    replay: { state: true },
   };
 
   declare private workspace: string;
   declare private hasTranscripts: boolean;
   declare private selected: string | null;
   declare private connection: ConnectionState;
+  declare private replay: { since: string; until: string } | null;
 
   private releaseConnection?: () => void;
   private readonly workspaces = new LatestController(this, WorkspacesDocument);
@@ -101,6 +104,7 @@ export class App extends LitElement {
     this.hasTranscripts = true;
     this.selected = null;
     this.connection = 'connecting';
+    this.replay = null;
   }
 
   connectedCallback(): void {
@@ -109,6 +113,9 @@ export class App extends LitElement {
       this.selected = (event as CustomEvent<string>).detail;
     });
     this.releaseConnection = onConnectionState((state) => (this.connection = state));
+    this.addEventListener('replay-range', (event) => {
+      this.replay = (event as CustomEvent<{ since: string; until: string } | null>).detail;
+    });
     request(StatusDocument)
       .then(({ status }) => {
         // Null until a hook reveals a project: the watcher no longer needs to be told what to
@@ -169,10 +176,11 @@ export class App extends LitElement {
       </header>
       <main>
         <ww-process-panel></ww-process-panel>
-        <ww-feed></ww-feed>
+        <ww-feed .replay=${this.replay}></ww-feed>
         <ww-git-panel .selected=${this.selected}></ww-git-panel>
         <ww-diff-panel .path=${this.selected}></ww-diff-panel>
       </main>
+      <ww-timeline></ww-timeline>
     `;
   }
 }

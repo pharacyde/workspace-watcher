@@ -2,6 +2,7 @@ package be.kleisli.ww.web;
 
 import be.kleisli.ww.claude.SessionRegistry;
 import be.kleisli.ww.claude.WorkspaceRegistry;
+import be.kleisli.ww.generated.types.ActivityBucket;
 import be.kleisli.ww.generated.types.FileStatus;
 import be.kleisli.ww.generated.types.FileVersions;
 import be.kleisli.ww.generated.types.GitSnapshot;
@@ -110,6 +111,19 @@ public class ApiMapper {
         .sessionId(stored.sessionId())
         .detail(stored.detail())
         .build();
+  }
+
+  public List<ActivityBucket> toActivity(List<EventStore.Bucket> buckets) {
+    return buckets.stream()
+        .map(
+            bucket ->
+                ActivityBucket.newBuilder()
+                    .index(bucket.index())
+                    .from(bucket.from())
+                    .count(bucket.count())
+                    .agentCount(bucket.agentCount())
+                    .build())
+        .toList();
   }
 
   public GuardConfig toGuardConfig(GuardService.Config config) {

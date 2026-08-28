@@ -130,6 +130,17 @@ public class WatchDataFetcher {
     return mapper.toSessions(sessions.current());
   }
 
+  /** Activity density over a range, for a timeline to draw. */
+  @DgsQuery
+  public List<be.kleisli.ww.generated.types.ActivityBucket> activity(
+      @InputArgument String workspace,
+      @InputArgument String since,
+      @InputArgument String until,
+      @InputArgument Integer buckets) {
+    return mapper.toActivity(
+        store.activity(workspace, since, until, buckets == null ? 240 : buckets));
+  }
+
   /** Guard rules, and whether they are enforced or only observed. */
   @DgsQuery
   public GuardConfig guard() {

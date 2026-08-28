@@ -136,9 +136,12 @@ from guessing at FS events.*
 *Note: no log scraping needed. Token usage is on the assistant messages in the transcript, and
 Claude Code also exports OpenTelemetry metrics natively.*
 
-**P7-03 Execution timeline / session replay** 🟢 — unblocked
-*Persistence is done (P9-01) and `history` already takes a time range, so what remains is the
-timeline UI itself. This is arguably the strongest feature in the whole list:
+**P7-03 Execution timeline / session replay** ✅
+*A timeline along the bottom over a selectable window, with a slice you can click to replay that
+moment out of the database. Density is counted in SQL rather than by returning rows - a month is
+millions of events and a timeline needs a few hundred numbers. Agent-caused events are counted
+apart from the rest, because a thousand file events during a checkout is noise while ten tool calls
+is the story, and one combined bar would hide the second behind the first. This is arguably the strongest feature in the whole list:
 scrubbing back through what an agent did over an hour is something no existing tool offers.*
 
 ## Epic 8 — Notifications & interactivity

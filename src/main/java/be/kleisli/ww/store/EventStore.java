@@ -16,6 +16,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
@@ -260,6 +261,77 @@ public class EventStore {
       return List.of();
     }
     return rows.reversed();
+  }
+
+  /** How many events fell in one slice of a timeline, and how many of those an agent caused. */
+  public record Bucket(int index, String from, int count, int agentCount) {}
+
+  /**
+   * Activity density over a range, for a timeline to draw.
+   *
+   * <p>Counted in SQL rather than by fetching the rows. A month of history is millions of events
+   * and a timeline needs a few hundred numbers, so pulling them across to count them would be the
+   * expensive way to draw a small picture.
+   *
+   * <p>Agent-caused events are counted separately because the two densities mean different things:
+   * a thousand file events during a checkout is noise, ten tool calls is the story.
+   */
+  public List<Bucket> activity(String workspace, String since, String until, int buckets) {
+    if (connection == null) {
+      return List.of();
+    }
+    Path fallback = active.get();
+    String target = workspace != null ? workspace : (fallback == null ? null : fallback.toString());
+    if (target == null || since == null || until == null) {
+      return List.of();
+    }
+    long from;
+    long to;
+    try {
+      from = Instant.parse(since).getEpochSecond();
+      to = Instant.parse(until).getEpochSecond();
+    } catch (DateTimeParseException e) {
+      // A client sending a malformed range gets an empty timeline, not a failed request.
+      log.debug("unparseable activity range {}..{}", since, until);
+      return List.of();
+    }
+    int slices = Math.clamp(buckets, 1, 2000);
+    long width = Math.max(1, (to - from) / slices);
+
+    String sql =
+        """
+        SELECT CAST((strftime('%s', ts) - ?) / ? AS INTEGER) AS bucket,
+               COUNT(*),
+               SUM(CASE WHEN source IN ('TRANSCRIPT', 'HOOK') THEN 1 ELSE 0 END)
+        FROM event
+        WHERE workspace = ? AND ts >= ? AND ts < ?
+        GROUP BY bucket
+        ORDER BY bucket\
+        """;
+
+    List<Bucket> result = new ArrayList<>();
+    try (PreparedStatement statement = connection.prepareStatement(sql)) {
+      statement.setLong(1, from);
+      statement.setLong(2, width);
+      statement.setString(3, target);
+      statement.setString(4, since);
+      statement.setString(5, until);
+      try (ResultSet rs = statement.executeQuery()) {
+        while (rs.next()) {
+          int index = rs.getInt(1);
+          result.add(
+              new Bucket(
+                  index,
+                  Instant.ofEpochSecond(from + (long) index * width).toString(),
+                  rs.getInt(2),
+                  rs.getInt(3)));
+        }
+      }
+    } catch (SQLException | RuntimeException e) {
+      log.warn("cannot read activity: {}", e.toString());
+      return List.of();
+    }
+    return result;
   }
 
   /**
