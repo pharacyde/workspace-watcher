@@ -42,6 +42,10 @@ class GitServiceTest {
     Shell.run(repo, command, 20);
   }
 
+  private void run(Path directory, String... args) {
+    Shell.run(directory, List.of(args), 20);
+  }
+
   private GitService serviceWatching(Path workspace) {
     WatcherProperties props = new WatcherProperties();
     props.setWorkspace(workspace.toString());
@@ -101,6 +105,48 @@ class GitServiceTest {
     GitService.Versions versions = service.versions("module/New.java");
     assertThat(versions.head()).isEmpty();
     assertThat(versions.working()).isEqualTo("class New {}\n");
+  }
+
+  @Test
+  @DisplayName("resolves a file inside a submodule against the submodule's own repository")
+  void resolvesInsideSubmodule() throws IOException {
+    // A submodule is a repository of its own. Asking the superproject for a file inside it fails
+    // with "exists on disk, but not in HEAD", and the file would render as entirely new.
+    Path inner = tmp.resolve("inner");
+    Files.createDirectories(inner);
+    Files.writeString(inner.resolve("Inner.java"), "class Inner {}\n");
+    run(inner, "git", "init", "--initial-branch=main");
+    run(inner, "git", "config", "user.email", "test@example.com");
+    run(inner, "git", "config", "user.name", "Test");
+    run(inner, "git", "add", ".");
+    run(inner, "git", "commit", "-m", "inner");
+
+    run(
+        repo,
+        "git",
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        inner.toString(),
+        "libs/inner");
+    run(repo, "git", "commit", "-m", "add submodule");
+    Files.writeString(repo.resolve("libs/inner/Inner.java"), "class Inner { int x; }\n");
+
+    GitService service = serviceWatching(repo);
+    GitService.Versions versions = service.versions("libs/inner/Inner.java");
+
+    assertThat(versions.head()).isEqualTo("class Inner {}\n");
+    assertThat(versions.working()).isEqualTo("class Inner { int x; }\n");
+  }
+
+  @Test
+  @DisplayName("reports the branch of a linked worktree, not of the main one")
+  void readsWorktreeBranch() throws IOException {
+    Path worktree = tmp.resolve("wt");
+    run(repo, "git", "worktree", "add", worktree.toString(), "-b", "feature");
+
+    assertThat(serviceWatching(worktree).current().branch()).isEqualTo("feature");
   }
 
   @Test

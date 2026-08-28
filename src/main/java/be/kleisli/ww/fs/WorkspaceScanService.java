@@ -199,7 +199,9 @@ public class WorkspaceScanService {
 
           @Override
           public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-            if (attrs.isRegularFile()) {
+            // In a linked worktree .git is a file, not a directory, so the directory filter never
+            // sees it and it would otherwise be reported on every git operation.
+            if (attrs.isRegularFile() && !ignore.contains(file.getFileName().toString())) {
               map.put(file, new Stamp(attrs.size(), attrs.lastModifiedTime().toMillis()));
             }
             return FileVisitResult.CONTINUE;

@@ -65,7 +65,13 @@ java -jar target/workspace-watcher-0.1.0-SNAPSHOT.jar
 No workspace argument. Install the hook once (below), then work as you normally would: the first
 tool call an agent makes in a project registers it, and the watcher starts following the project
 you are actually in. Switch between registered projects from the dropdown in the header, or pin one
-with `--watcher.workspace=/path/to/project`.
+with `--watcher.workspace=/path/to/project`. A choice is remembered across restarts — on the server
+rather than in the browser, because the server is what does the watching, and the two disagreeing
+would leave the panels describing a different project than the header claims.
+
+Switching takes every panel with it: git, processes, sessions, the feed, and any file you had
+open. The live feed is one workspace's chronicle, so it starts fresh; recorded history keeps the
+previous workspace's events, tagged with where they belonged.
 
 `mvn package` builds both halves: Maven downloads a pinned node, runs the frontend build, and packs
 the result into the jar. Use `-DskipFrontend` to build the backend alone.
@@ -182,6 +188,17 @@ timeout to every subsequent tool call.
 Either way the script always exits 0 and discards all output. A hook blocks the agent until it
 returns, and an observer must never be able to block or alter the agent it is watching.
 
+### Git layouts
+
+Branches and linked worktrees work as they are: `git` reports the worktree's own branch and root,
+and the watcher follows.
+
+Submodules needed handling. `git status` in a superproject shows a submodule as one entry rather
+than the files inside it, and a file inside a submodule lives in that submodule's object store —
+asking the superproject for it fails with *exists on disk, but not in HEAD*, which would have
+rendered the file as entirely new. The diff resolves each file against whichever repository
+actually tracks it, and a submodule entry is labelled as such rather than as a modified file.
+
 ## Guard (optional)
 
 Rules about what an agent may touch. This is the one place the project stops being a passive
@@ -224,6 +241,7 @@ Any property can be passed as `--watcher.foo=bar` or set in `application.yml`.
 | Property | Default | |
 |---|---|---|
 | `watcher.workspace` | *(empty — discover it)* | pin to one folder instead of following hooks |
+| `watcher.max-stored-events` | `1000000` | hard cap on history, about half a gigabyte |
 | `watcher.claude-home` | `~/.claude` | where transcripts live |
 | `watcher.fs-poll-ms` | `750` | workspace rescan interval |
 | `watcher.transcript-poll-ms` | `500` | transcript tail interval |

@@ -42,9 +42,15 @@ public class TranscriptLocator {
     }
     String prefix = escapeCwd(workspace);
     try (Stream<Path> dirs = Files.list(projects)) {
-      // The exact directory, plus any session started in a subdirectory of the workspace.
+      // The exact directory, plus any session started in a subdirectory of the workspace. The
+      // boundary matters: a bare prefix test also matches a sibling, so watching /Users/me/Dev
+      // would pull in every session from /Users/me/Dev2 as well.
       return dirs.filter(Files::isDirectory)
-          .filter(dir -> dir.getFileName().toString().startsWith(prefix))
+          .filter(
+              dir -> {
+                String name = dir.getFileName().toString();
+                return name.equals(prefix) || name.startsWith(prefix + "-");
+              })
           .toList();
     } catch (IOException e) {
       return List.of();

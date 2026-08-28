@@ -69,6 +69,19 @@ export class EventLogController<TItem extends { seq: string }> implements Reacti
     });
   }
 
+  /**
+   * Throws away everything collected so far.
+   *
+   * <p>Used when the watcher switches workspace: the server starts a new chronicle, and a client
+   * still holding the previous workspace's events would show them as belonging to the new one.
+   */
+  reset(): void {
+    this.items = [];
+    this.pending = [];
+    this.lastSeq = 0;
+    this.host.requestUpdate();
+  }
+
   hostDisconnected(): void {
     this.unsubscribe?.();
     if (this.frame !== null) cancelAnimationFrame(this.frame);

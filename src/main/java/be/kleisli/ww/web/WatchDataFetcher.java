@@ -203,7 +203,13 @@ public class WatchDataFetcher {
    */
   @DgsMutation
   public boolean watchWorkspace(@InputArgument String path) {
-    active.set(Path.of(path));
+    if (active.set(Path.of(path))) {
+      // The live feed is one workspace's chronicle. Leaving the previous one's events in place
+      // would attribute them to the new workspace by proximity alone; recorded history keeps them.
+      eventBus.clear();
+      eventBus.publish(
+          WatchEvent.of(WatchEvent.Source.SYSTEM, "WORKSPACE").summary("now watching " + path));
+    }
     return true;
   }
 

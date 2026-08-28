@@ -32,6 +32,7 @@ export class Feed extends LitElement {
     hidden_: { state: true },
     session: { state: true },
     replay: { attribute: false },
+    workspace: { attribute: false },
     replayed: { state: true },
   };
 
@@ -40,6 +41,8 @@ export class Feed extends LitElement {
   declare private session: string;
   /** Set by the timeline to a recorded window; null means follow the live stream. */
   declare replay: { since: string; until: string } | null;
+  /** Only used to notice a switch; the feed itself is always about the watched workspace. */
+  declare workspace: string | null;
   declare private replayed: Event[];
 
   static styles = [
@@ -131,6 +134,7 @@ export class Feed extends LitElement {
     this.session = '';
     this.replay = null;
     this.replayed = [];
+    this.workspace = null;
   }
 
   private toggle(source: Source) {
@@ -153,6 +157,13 @@ export class Feed extends LitElement {
   }
 
   updated(changed: Map<string, unknown>) {
+    if (changed.has('workspace') && changed.get('workspace') != null) {
+      // A switch starts a new chronicle. Keeping the old events, or a session filter naming a
+      // session from the previous project, would describe the wrong workspace.
+      this.log.reset();
+      this.session = '';
+      this.cache = null;
+    }
     this.followTail();
     if (!changed.has('replay')) return;
     if (!this.replay) {

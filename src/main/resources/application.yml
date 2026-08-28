@@ -22,8 +22,10 @@ spring:
         enabled: true
 
 watcher:
-  # Override with --watcher.workspace=/path/to/project
-  workspace: ${user.dir}
+  # Empty means discover it: the watcher waits for an agent hook to say which project is being
+  # worked in, and otherwise reinstates whichever workspace was chosen last. Set this, or pass
+  # --watcher.workspace=/path/to/project, to pin it to one instead.
+  workspace: ""
   claude-home: ${user.home}/.claude
   fs-poll-ms: 750
   transcript-poll-ms: 500

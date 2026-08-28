@@ -58,6 +58,19 @@ public class EventBus {
     return event;
   }
 
+  /**
+   * Empties the buffer.
+   *
+   * <p>The live feed is the chronicle of one workspace, so switching to another has to start a new
+   * one; leaving the previous workspace's events in place would attribute them to the new one by
+   * proximity alone. Recorded history keeps them, tagged with where they belonged.
+   */
+  public void clear() {
+    synchronized (history) {
+      history.clear();
+    }
+  }
+
   public List<WatchEvent> replay() {
     synchronized (history) {
       return new ArrayList<>(history);

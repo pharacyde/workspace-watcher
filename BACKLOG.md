@@ -156,6 +156,10 @@ opt-in as P4-01.*
 
 ---
 
+**P4-03b Workspace switching completeness** ✅
+*Every panel follows a switch — git, processes, sessions, the feed, the open file — and the choice
+is remembered across restarts, on the server rather than in the browser.*
+
 ## Epic 9 — Added: what the original list did not cover
 
 **P9-01 Event persistence (SQLite)** ✅

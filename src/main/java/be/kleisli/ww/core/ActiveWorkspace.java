@@ -1,5 +1,7 @@
 package be.kleisli.ww.core;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -26,11 +28,60 @@ public class ActiveWorkspace {
   private final StateStream<String> stream = new StateStream<>();
   private volatile Path current;
 
+  private final WatcherProperties props;
+
   public ActiveWorkspace(WatcherProperties props) {
+    this.props = props;
     String configured = props.getWorkspace();
     if (configured != null && !configured.isBlank()) {
+      // Explicitly pinned on the command line: that wins over anything remembered.
       set(Paths.get(configured));
+      return;
     }
+    restore();
+  }
+
+  /**
+   * Reinstates the workspace chosen last time.
+   *
+   * <p>Remembered on the server rather than in the browser, because the server is what does the
+   * watching. If a browser remembered the choice while the watcher adopted whatever was most
+   * recently active, the two would disagree and the panels would describe a different project than
+   * the header claimed.
+   */
+  private void restore() {
+    Path file = rememberedFile();
+    if (!Files.isRegularFile(file)) {
+      return;
+    }
+    try {
+      String remembered = Files.readString(file, StandardCharsets.UTF_8).strip();
+      if (!remembered.isEmpty() && Files.isDirectory(Path.of(remembered))) {
+        set(Path.of(remembered));
+      }
+    } catch (IOException | RuntimeException e) {
+      // Falling back to discovery is a fine outcome; a corrupt note is not worth a failed start.
+      log.debug("cannot read remembered workspace: {}", e.toString());
+    }
+  }
+
+  private void remember(Path path) {
+    Path file = rememberedFile();
+    try {
+      Files.createDirectories(file.getParent());
+      Files.writeString(file, path.toString(), StandardCharsets.UTF_8);
+    } catch (IOException | RuntimeException e) {
+      log.debug("cannot remember workspace: {}", e.toString());
+    }
+  }
+
+  private Path rememberedFile() {
+    Path database = Path.of(props.getDatabase()).toAbsolutePath().normalize();
+    Path directory =
+        database.getParent() != null
+            ? database.getParent()
+            : Path.of(System.getProperty("user.dir"));
+    return directory.resolve("active-workspace");
   }
 
   /** The workspace being observed, or null when none has been chosen yet. */
@@ -61,6 +112,7 @@ public class ActiveWorkspace {
     }
     log.info("watching {}", resolved);
     current = resolved;
+    remember(resolved);
     stream.publish(resolved.toString());
     return true;
   }

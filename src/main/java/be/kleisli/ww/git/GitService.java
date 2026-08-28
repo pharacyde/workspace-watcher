@@ -123,7 +123,11 @@ public class GitService {
       if (arrow >= 0) {
         path = path.substring(arrow + 4);
       }
-      files.add(new FileStatus(path, describe(index, worktree), index != ' ' && index != '?'));
+      // A submodule appears as a single entry whose path is a directory. Labelling it "modified"
+      // would invite a click that tries to diff a directory.
+      String state =
+          Files.isDirectory(root.resolve(path)) ? "submodule" : describe(index, worktree);
+      files.add(new FileStatus(path, state, index != ' ' && index != '?'));
     }
     return new Snapshot(true, branch.isEmpty() ? "(detached)" : branch, head, subject, files);
   }
@@ -134,6 +138,24 @@ public class GitService {
     if (index == 'D' || worktree == 'D') return "deleted";
     if (index == 'R') return "renamed";
     return "modified";
+  }
+
+  /**
+   * The repository that actually tracks a file, which is not always the one being watched.
+   *
+   * <p>A submodule is a repository of its own nested inside another. The superproject records only
+   * its commit, so anything about the files inside it has to be asked of the submodule.
+   */
+  private Path repositoryOwning(Path file) {
+    Path directory = Files.isDirectory(file) ? file : file.getParent();
+    if (directory == null) {
+      return root;
+    }
+    Shell.Result result = Shell.run(directory, List.of("git", "rev-parse", "--show-toplevel"), 5);
+    if (!result.ok() || result.stdout().isBlank()) {
+      return root;
+    }
+    return Path.of(result.stdout().strip()).toAbsolutePath().normalize();
   }
 
   public record Versions(
@@ -148,8 +170,14 @@ public class GitService {
   public Versions versions(String relativePath) {
     Path file = resolveInRepo(relativePath);
 
-    // Run from the repository root: "HEAD:<path>" is resolved from there, not from the cwd.
-    String head = Shell.run(root, List.of("git", "show", "HEAD:" + relativePath), 15).stdout();
+    // A file inside a submodule lives in that submodule's own object store, so asking the
+    // superproject for it fails with "exists on disk, but not in HEAD" and the whole file would
+    // render as newly added. Ask whichever repository actually owns the file.
+    Path owner = repositoryOwning(file);
+    String pathInOwner = owner.equals(root) ? relativePath : owner.relativize(file).toString();
+
+    // Run from that repository root: "HEAD:<path>" is resolved from there, not from the cwd.
+    String head = Shell.run(owner, List.of("git", "show", "HEAD:" + pathInOwner), 15).stdout();
 
     String working = "";
     boolean binary = false;

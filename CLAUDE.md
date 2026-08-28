@@ -155,6 +155,17 @@ own `~/.claude`.
 - **Recording must never slow a collector.** `EventStore` queues and flushes on a scheduler, and
   drops the newest events if the queue fills rather than blocking. It also subscribes to the bus
   instead of the bus knowing about it, so storage stays invisible to the thing being stored.
+- **A file may not belong to the repository being watched.** Submodules are separate repositories;
+  `git show HEAD:<path>` from the superproject fails for anything inside one. `versions()` asks
+  whichever repository actually tracks the file.
+- **In a linked worktree `.git` is a file, not a directory**, so a directory-only ignore filter
+  never sees it and it gets reported on every git operation.
+- **Prefix matches need a boundary.** Transcript directories are matched by escaped-path prefix; a
+  bare `startsWith` makes `/Users/me/Dev` also match `/Users/me/Dev2`. Same class of bug as the
+  `lsof` sibling-directory case, and both have tests.
+- **`watcher.workspace` must stay empty in application.yml.** It was `${user.dir}`, which silently
+  overrode the empty Java default: discovery and the remembered workspace never ran, and every test
+  that started the app from the repository directory looked like it worked.
 - **`lsof +D` is a trap.** It walks the entire tree on every call. `lsof -a -d cwd -F pn` returns all
   processes' working directories in one cheap call; filter in Java.
 - **The subscription must not have a gap.** `EventBus.stream()` snapshots history and registers the

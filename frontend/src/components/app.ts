@@ -116,6 +116,18 @@ export class App extends LitElement {
     this.addEventListener('replay-range', (event) => {
       this.replay = (event as CustomEvent<{ since: string; until: string } | null>).detail;
     });
+    // Anything naming something in the old workspace has to go: a selected file, a replay window.
+    let previous: string | null = null;
+    this.addController({
+      hostUpdate: () => {
+        const current = this.active.value?.activeWorkspace ?? null;
+        if (current !== null && previous !== null && current !== previous) {
+          this.selected = null;
+          this.replay = null;
+        }
+        previous = current;
+      },
+    });
     request(StatusDocument)
       .then(({ status }) => {
         // Null until a hook reveals a project: the watcher no longer needs to be told what to
@@ -176,7 +188,7 @@ export class App extends LitElement {
       </header>
       <main>
         <ww-process-panel></ww-process-panel>
-        <ww-feed .replay=${this.replay}></ww-feed>
+        <ww-feed .replay=${this.replay} .workspace=${this.active.value?.activeWorkspace ?? null}></ww-feed>
         <ww-git-panel .selected=${this.selected}></ww-git-panel>
         <ww-diff-panel .path=${this.selected}></ww-diff-panel>
       </main>
