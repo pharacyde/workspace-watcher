@@ -172,6 +172,7 @@ export class Notify extends LitElement {
     // during a gesture. Without this the setting would say "sound" and stay silent after every
     // reload, which is the worst kind of broken - the one that looks configured correctly.
     if (this.mode === 'sound') {
+      // once:true removes only the listener that fired, so the other one outlives the element.
       document.addEventListener('click', this.openAudio, { once: true });
       document.addEventListener('keydown', this.openAudio, { once: true });
     }
@@ -183,6 +184,9 @@ export class Notify extends LitElement {
     super.disconnectedCallback();
     this.release?.();
     document.removeEventListener('visibilitychange', this.onVisibility);
+    // Whichever of the two never fired is still registered; once:true only clears the other.
+    document.removeEventListener('click', this.openAudio);
+    document.removeEventListener('keydown', this.openAudio);
   }
 
   private openAudio = () => {
@@ -198,9 +202,12 @@ export class Notify extends LitElement {
         element.pause();
         element.muted = false;
         element.currentTime = 0;
+        // Published only once it is actually usable. Assigned before the promise resolved, a
+        // notification arriving in that gap played an element that was still muted: silent, with
+        // nothing to say why - the failure mode this whole unlock dance exists to avoid.
+        this.audio = element;
       })
       .catch(() => undefined);
-    this.audio = element;
   };
 
   private onVisibility = () => {

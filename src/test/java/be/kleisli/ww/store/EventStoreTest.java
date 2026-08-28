@@ -240,4 +240,31 @@ class EventStoreTest {
         .extracting(EventStore.Stored::summary)
         .contains("after");
   }
+
+  @Test
+  @DisplayName("caps resource samples by count, not only by age")
+  void capsMetrics() {
+    props.setMaxStoredMetrics(10);
+    Wiring w = open();
+    for (int i = 0; i < 40; i++) {
+      w.store().recordResources(workspace.toString(), 1.5, 2048);
+    }
+
+    // Samples are written on a schedule rather than when something changes, so the count says
+    // nothing about how much happened: measured at 2833 rows in under three hours, roughly 740k a
+    // month on an idle watcher. Age alone never catches up with that.
+    w.store().prune();
+
+    assertThat(countMetrics()).isLessThanOrEqualTo(11);
+  }
+
+  private int countMetrics() {
+    try (java.sql.Connection c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + database);
+        java.sql.Statement st = c.createStatement();
+        java.sql.ResultSet rs = st.executeQuery("SELECT count(*) FROM metric")) {
+      return rs.next() ? rs.getInt(1) : -1;
+    } catch (java.sql.SQLException e) {
+      throw new IllegalStateException(e);
+    }
+  }
 }

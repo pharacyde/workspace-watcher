@@ -145,16 +145,87 @@ class FileTailServiceTest {
   }
 
   @Test
-  @DisplayName("says so when there is no such file")
-  void reportsAMissingFile() {
-    StepVerifier.create(service.follow("nothing-here.txt").take(1))
+  @DisplayName("says a file is missing once, and then stops")
+  void reportsAMissingFileOnce() {
+    // No take(1) here, deliberately: with one the test passed while the subscription went on
+    // repeating itself 2.5 times a second for as long as a panel stayed open. Clicking a DELETED
+    // row in the feed was enough to trigger it.
+    List<FileTailService.Chunk> chunks =
+        service.follow("nothing-here.txt").take(Duration.ofSeconds(2)).collectList().block();
+
+    assertThat(chunks).hasSize(1);
+    assertThat(chunks.get(0).gone()).isTrue();
+  }
+
+  @Test
+  @DisplayName("stops following a file that is deleted underneath it")
+  void stopsWhenTheFileDisappears() throws IOException {
+    Path file = workspace.resolve("doomed.log");
+    append(file, "here for now\n");
+
+    List<FileTailService.Chunk> chunks =
+        service
+            .follow("doomed.log")
+            .doOnNext(
+                chunk -> {
+                  if (!chunk.gone()) {
+                    try {
+                      Files.deleteIfExists(file);
+                    } catch (IOException e) {
+                      throw new IllegalStateException(e);
+                    }
+                  }
+                })
+            .take(Duration.ofSeconds(3))
+            .collectList()
+            .block();
+
+    assertThat(chunks).hasSize(2);
+    assertThat(chunks.get(1).gone()).isTrue();
+  }
+
+  @Test
+  @DisplayName("declines a file that is not text")
+  void declinesBinaryFiles() throws IOException {
+    Path file = workspace.resolve("logo.png");
+    Files.write(file, new byte[] {(byte) 0x89, 'P', 'N', 'G', 0, 0, 0, 13, 'I', 'H', 'D', 'R'});
+
+    List<FileTailService.Chunk> chunks =
+        service.follow("logo.png").take(Duration.ofSeconds(2)).collectList().block();
+
+    // Every file in the tree produces feed rows, so an image is one click away.
+    assertThat(chunks).hasSize(1);
+    assertThat(chunks.get(0).binary()).isTrue();
+    assertThat(chunks.get(0).text()).isEmpty();
+  }
+
+  @Test
+  @DisplayName("never splits a character across two chunks, even without a newline")
+  void cutsLongLinesAtACharacterBoundary() throws IOException {
+    Path file = workspace.resolve("progress.log");
+    append(file, "start\n");
+
+    StepVerifier.create(service.follow("progress.log").take(2))
+        .assertNext(chunk -> assertThat(chunk.text()).isEqualTo("start\n"))
+        .then(
+            () -> {
+              try {
+                // Over the chunk limit with no newline anywhere, all multi-byte: a progress bar
+                // drawn with \r looks exactly like this. Cutting at an arbitrary byte would split a
+                // character and decode as replacement characters.
+                append(file, "é".repeat(400_000));
+              } catch (IOException e) {
+                throw new IllegalStateException(e);
+              }
+            })
         .assertNext(
             chunk -> {
-              assertThat(chunk.gone()).isTrue();
-              assertThat(chunk.text()).isEmpty();
+              assertThat(chunk.text()).doesNotContain("\uFFFD");
+              assertThat(chunk.text()).isNotEmpty();
+              assertThat(chunk.text().chars().allMatch(c -> c == 'é')).isTrue();
             })
         .expectComplete()
-        .verify(Duration.ofSeconds(10));
+        .verify(Duration.ofSeconds(15));
   }
 
   @Test

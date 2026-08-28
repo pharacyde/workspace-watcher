@@ -23,6 +23,7 @@ class WorkspaceScanServiceTest {
   private Path workspace;
   private WatcherProperties props;
   private EventBus bus;
+  private ActiveWorkspace active;
   private WorkspaceScanService scanner;
 
   @BeforeEach
@@ -34,7 +35,7 @@ class WorkspaceScanServiceTest {
     // No pacing in tests: the scanner normally spaces itself out by how long a walk takes.
     props.setFsPollMs(0);
 
-    ActiveWorkspace active = new ActiveWorkspace(props);
+    active = new ActiveWorkspace(props);
     bus = new EventBus(props);
     scanner = new WorkspaceScanService(props, active, bus, new GitService(active, props));
   }
@@ -130,6 +131,28 @@ class WorkspaceScanServiceTest {
     scanner.scan();
 
     assertThat(since(baseline)).isEmpty();
+  }
+
+  @Test
+  @DisplayName("a file that merely shares a name with an ignored directory is still watched")
+  void watchesFilesNamedLikeIgnoredDirectories() throws IOException {
+    assertThat(props.getIgnoreDirs()).contains("build");
+    scanner.scan();
+    int baseline = bus.replay().size();
+
+    // The ignore list is a list of directories. Applying it to file names as well silently dropped
+    // a file called "build" or "dist", which is an ordinary thing to have at a repository root -
+    // and a file the watcher never mentions is indistinguishable from one nothing touched.
+    Files.writeString(workspace.resolve("build"), "#!/bin/sh\nmvn package\n");
+    scanner.scan();
+
+    assertThat(since(baseline))
+        .singleElement()
+        .satisfies(
+            event -> {
+              assertThat(event.type()).isEqualTo("CREATED");
+              assertThat(event.path()).isEqualTo("build");
+            });
   }
 
   @Test
@@ -229,6 +252,37 @@ class WorkspaceScanServiceTest {
             event -> {
               assertThat(event.type()).isEqualTo("MODIFIED");
               assertThat(event.path()).isEqualTo("rotated.log");
+            });
+  }
+
+  @Test
+  @DisplayName("forgets growth runs when the workspace changes")
+  void growthRunsDoNotSurviveAWorkspaceSwitch() throws IOException {
+    Path log = workspace.resolve("run.log");
+    Files.writeString(log, "a\n");
+    scanner.scan();
+    Files.writeString(log, "a\nb\n");
+    scanner.scan();
+    Files.writeString(log, "a\nb\nc\n");
+    scanner.scan();
+
+    // Away and back. The counters describe a tree we left; kept, the first ordinary save here is
+    // labelled a live log, and the map grows with every switch.
+    Path other = Files.createDirectory(tmp.resolve("other"));
+    active.set(other);
+    scanner.scan();
+    active.set(workspace);
+    scanner.scan();
+
+    int baseline = bus.replay().size();
+    Files.writeString(log, "a\nb\nc\nd\n");
+    scanner.scan();
+
+    assertThat(since(baseline))
+        .anySatisfy(
+            event -> {
+              assertThat(event.type()).isEqualTo("MODIFIED");
+              assertThat(event.path()).isEqualTo("run.log");
             });
   }
 }

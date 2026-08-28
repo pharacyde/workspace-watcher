@@ -438,6 +438,11 @@ type FileChunk {
   reset: Boolean!
   "The file was longer than what was sent, and the text starts partway in."
   truncated: Boolean!
-  "There is no such file, or it is not one we will read."
+  "There is no such file, or it is no longer there."
   gone: Boolean!
+  """
+  Not text, so nothing is sent. Every file in the tree produces feed rows, so an image or a jar is
+  one click away, and half a megabyte of replacement characters in a <pre> helps nobody.
+  """
+  binary: Boolean!
 }

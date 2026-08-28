@@ -192,6 +192,29 @@ class UsageServiceTest {
   }
 
   @Test
+  @DisplayName("the rolling window counts a message once too, so it agrees with the total")
+  void windowedFigureIsDeduplicatedAsWell() throws IOException {
+    // The 5h and 7d figures come from the same records as the total but by a different path, so
+    // deduplicating only one of the two would leave the pill contradicting itself - and the window
+    // is the number that is meant to stand in for a subscription's limits.
+    String now = java.time.Instant.now().toString();
+    for (String block : new String[] {"thinking", "text", "tool_use"}) {
+      Files.writeString(
+          transcript,
+          """
+          {"type":"assistant","timestamp":"%s","message":{"id":"msg_w","model":"claude-opus-5",\
+          "content":[{"type":"%s"}],"usage":{"input_tokens":10,"output_tokens":700}}}
+          """
+              .formatted(now, block),
+          StandardCharsets.UTF_8,
+          StandardOpenOption.APPEND);
+    }
+
+    assertThat(usage.inLastSeconds(3600).output()).isEqualTo(700);
+    assertThat(usage.summarise(null).last5h().output()).isEqualTo(700);
+  }
+
+  @Test
   @DisplayName("two different messages are both counted")
   void countsDistinctMessages() throws IOException {
     for (String id : new String[] {"msg_1", "msg_2"}) {
@@ -258,5 +281,17 @@ class UsageServiceTest {
     appendTo(agent, "claude-opus-5", 1_000_000, 0);
 
     assertThat(usage.summarise("session-b").tokens().total()).isEqualTo(500_000);
+  }
+
+  @Test
+  @DisplayName("files a session transcript by its path, whatever it is called")
+  void aSessionNamedLikeAnAgentIsStillASession() throws IOException {
+    // Deciding this from the "agent-" prefix filed it under a session that does not exist, and its
+    // tokens then vanished from every per-session bill. Where the file sits cannot be fooled.
+    Path oddly = projects.resolve("agent-of-change.jsonl");
+    Files.writeString(oddly, "");
+    appendTo(oddly, "claude-opus-5", 700_000, 0);
+
+    assertThat(usage.summarise("agent-of-change").tokens().total()).isEqualTo(700_000);
   }
 }

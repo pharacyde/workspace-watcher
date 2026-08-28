@@ -11,6 +11,21 @@ type FeedEvent = EventsSubscription['events'];
 const CONTENT_LIMIT = 400_000;
 
 /**
+ * Keeps the last CONTENT_LIMIT characters, cut at a line boundary where there is one.
+ *
+ * <p>The line boundary is a nicety, not the rule. Written as one indexOf it was a no-op on the file
+ * it mattered for: a log with no newline in it - a progress bar drawn with \r, minified output, one
+ * long JSON blob - returns -1, and slicing from there returns the whole string, so the cap held
+ * nothing back on exactly the input it existed for.
+ */
+function trimToLimit(text: string): string {
+  if (text.length <= CONTENT_LIMIT) return text;
+  const cut = text.length - CONTENT_LIMIT;
+  const boundary = text.indexOf('\n', cut);
+  return boundary === -1 ? text.slice(cut) : text.slice(boundary + 1);
+}
+
+/**
  * Pretty-prints and colours a body that turns out to be JSON, and leaves everything else alone.
  *
  * <p>Much of what an agent hands back is JSON on one enormous line - a hook payload, a tool's
@@ -241,6 +256,11 @@ export class DiffPanel extends LitElement {
       FileTailDocument,
       ({ fileTail }) => {
         if (this.followed !== path) return;
+        if (fileTail.binary) {
+          this.content = '';
+          this.contentNote = 'not a text file';
+          return;
+        }
         if (fileTail.gone) {
           this.content = '';
           this.contentNote = 'no such file in this workspace';
@@ -250,9 +270,7 @@ export class DiffPanel extends LitElement {
         const next = fileTail.reset ? fileTail.text : this.content + fileTail.text;
         // Capped from the front: a build log outgrows any browser, and it is the end that is
         // being watched. Cutting at a line boundary keeps the first visible line whole.
-        this.content = next.length > CONTENT_LIMIT
-          ? next.slice(next.indexOf('\n', next.length - CONTENT_LIMIT) + 1)
-          : next;
+        this.content = trimToLimit(next);
         void this.scrollContentToEnd();
       },
       { path },
@@ -284,9 +302,12 @@ export class DiffPanel extends LitElement {
   }
 
   updated(changed: Map<string, unknown>) {
+    // Anything other than "we are showing this file" stops the stream. Testing only for !event
+    // left it running when the selection moved to an event with no path at all - a Bash call, say -
+    // so a log kept streaming into a panel that was showing something else entirely.
     if (this.event?.path && this.view === 'content') {
       this.follow(this.event.path);
-    } else if (!this.event) {
+    } else {
       this.stopFollowing();
     }
     if (!changed.has('path') && !changed.has('event')) return;

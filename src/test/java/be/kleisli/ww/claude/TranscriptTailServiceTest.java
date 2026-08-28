@@ -42,6 +42,9 @@ class TranscriptTailServiceTest {
     props = new WatcherProperties();
     props.setClaudeHome(claudeHome.toString());
     props.setWorkspace(workspace.toString());
+    // ActiveWorkspace writes its "remembered workspace" note beside the database, and the default
+    // points at the developer's own ~/.claude. Nothing in this suite may touch that.
+    props.setDatabase(tmp.resolve("history/events.db").toString());
     bus = new EventBus(props);
     active = new ActiveWorkspace(props);
     TranscriptLocator locator = new TranscriptLocator(props, active);
@@ -347,5 +350,39 @@ class TranscriptTailServiceTest {
     append(toolUse("Bash", "{\"command\":\"echo old\"}"));
 
     assertThat(poll()).isEmpty();
+  }
+
+  @Test
+  @DisplayName("a workspace switch takes a fresh baseline instead of replaying the new project")
+  void switchingWorkspaceRebaselines() throws IOException {
+    // The baseline is per workspace, not per process. Every transcript of a project we have just
+    // been pointed at is unknown to the offsets, and without a second baseline all of them would
+    // count as "created while we were watching" - burying the live session under a replay of the
+    // whole project, which is the one thing the offsets exist to prevent.
+    assertThat(poll()).isEmpty();
+
+    Path other = Files.createDirectory(tmp.resolve("other"));
+    Path otherTranscript =
+        Files.createDirectories(
+                Path.of(props.getClaudeHome())
+                    .resolve("projects")
+                    .resolve(TranscriptLocator.escapeCwd(other)))
+            .resolve("other-session.jsonl");
+    Files.writeString(otherTranscript, toolUse("Bash", "{\"command\":\"echo history\"}") + "\n");
+
+    active.set(other);
+
+    assertThat(poll()).isEmpty();
+
+    Files.writeString(
+        otherTranscript,
+        toolUse("Bash", "{\"command\":\"echo live\"}") + "\n",
+        StandardCharsets.UTF_8,
+        java.nio.file.StandardOpenOption.APPEND);
+
+    // What arrives after the switch is still reported: the baseline silences history, not activity.
+    assertThat(poll())
+        .singleElement()
+        .satisfies(e -> assertThat(e.summary()).contains("echo live"));
   }
 }

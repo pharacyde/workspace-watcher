@@ -44,7 +44,12 @@ public class FileTailService {
    *     truncated or replaced and what came before no longer describes it
    * @param truncated the file was longer than what is shown, and this starts mid-file
    */
-  public record Chunk(String path, String text, boolean reset, boolean truncated, boolean gone) {}
+  public record Chunk(
+      String path, String text, boolean reset, boolean truncated, boolean gone, boolean binary) {}
+
+  private static Chunk absent(String path) {
+    return new Chunk(path, "", true, false, true, false);
+  }
 
   private final ActiveWorkspace active;
   private final WatcherProperties props;
@@ -82,7 +87,7 @@ public class FileTailService {
   public Flux<Chunk> follow(String relativePath) {
     Path file = resolve(relativePath);
     if (file == null) {
-      return Flux.just(new Chunk(relativePath, "", true, false, true));
+      return Flux.just(absent(relativePath));
     }
     AtomicLong offset = new AtomicLong(-1);
     return Flux.concat(
@@ -99,12 +104,16 @@ public class FileTailService {
                         sink.next(chunk);
                       }
                     }))
+        // A file that is not there is not going to be there on the next poll either. Without
+        // this the subscription reported its absence 2.5 times a second for as long as the
+        // panel stayed open - measured at five chunks in two seconds.
+        .takeUntil(chunk -> chunk.gone() || chunk.binary())
         .onErrorResume(
             e -> {
               // At warn, not debug: this ends the subscription, so the panel stops updating and
               // the reason should not be invisible.
               log.warn("stopped following {}: {}", file, e.toString());
-              return Flux.just(new Chunk(relativePath, "", true, false, true));
+              return Flux.just(absent(relativePath));
             });
   }
 
@@ -112,9 +121,14 @@ public class FileTailService {
   private Chunk open(String relativePath, Path file, AtomicLong offset) {
     try {
       if (!Files.isRegularFile(file)) {
-        return new Chunk(relativePath, "", true, false, true);
+        return absent(relativePath);
       }
       long length = Files.size(file);
+      if (looksBinary(file)) {
+        // Every file in the tree produces feed rows, so a .png or a .jar is one click away. Sending
+        // half a megabyte of replacement characters to be rendered in a <pre> helps nobody.
+        return new Chunk(relativePath, "", true, false, false, true);
+      }
       if (length > props.getMaxDiffBytes()) {
         // Deliberately still readable: for a log the end is the part anyone wants, and refusing
         // outright would make the panel useless for exactly the biggest build.
@@ -126,10 +140,31 @@ public class FileTailService {
         raf.readFully(all);
       }
       offset.set(length);
-      return new Chunk(relativePath, new String(all, StandardCharsets.UTF_8), true, false, false);
+      return new Chunk(
+          relativePath, new String(all, StandardCharsets.UTF_8), true, false, false, false);
     } catch (IOException e) {
       log.debug("cannot read {}: {}", file, e.toString());
-      return new Chunk(relativePath, "", true, false, true);
+      return absent(relativePath);
+    }
+  }
+
+  /**
+   * Whether the first few kilobytes contain a NUL byte.
+   *
+   * <p>The same test {@code git} uses, and for the same reason: it is cheap, it needs no library,
+   * and it is right about every format anyone will actually click on here.
+   */
+  private static boolean looksBinary(Path file) {
+    try (java.io.InputStream in = Files.newInputStream(file)) {
+      byte[] head = in.readNBytes(8 * 1024);
+      for (byte b : head) {
+        if (b == 0) {
+          return true;
+        }
+      }
+      return false;
+    } catch (IOException e) {
+      return false;
     }
   }
 
@@ -152,14 +187,29 @@ public class FileTailService {
       start++;
     }
     String text = new String(bytes, start, bytes.length - start, StandardCharsets.UTF_8);
-    return new Chunk(relativePath, text, true, from > 0, false);
+    return new Chunk(relativePath, text, true, from > 0, false, false);
+  }
+
+  /**
+   * The index of the last byte that completes a UTF-8 character, or -1 if none does.
+   *
+   * <p>Continuation bytes are {@code 10xxxxxx}; walking back over them lands on the lead byte of
+   * the character that was cut, and everything before it decodes cleanly.
+   */
+  private static int lastCompleteCharacter(byte[] chunk) {
+    int i = chunk.length - 1;
+    while (i >= 0 && (chunk[i] & 0xC0) == 0x80) {
+      i--;
+    }
+    // i is now the lead byte of a possibly incomplete character, so keep everything before it.
+    return i - 1;
   }
 
   /** Whatever has been appended since the last look, or null when nothing has. */
   private Chunk more(String relativePath, Path file, AtomicLong offset) {
     try {
       if (!Files.isRegularFile(file)) {
-        return new Chunk(relativePath, "", true, false, true);
+        return absent(relativePath);
       }
       long length = Files.size(file);
       long known = offset.get();
@@ -185,16 +235,23 @@ public class FileTailService {
         }
       }
       if (lastNewline < 0) {
-        // A single line longer than the chunk limit would otherwise never be delivered.
+        // A single line longer than the chunk limit would otherwise never be delivered. Cut at a
+        // character boundary rather than at an arbitrary byte: splitting a multi-byte character
+        // across two chunks is the exact failure the newline rule above exists to avoid, and a
+        // progress bar written with \r is a real file with no newline in half a megabyte.
         if (want < CHUNK_LIMIT) {
           return null;
         }
-        lastNewline = chunk.length - 1;
+        lastNewline = lastCompleteCharacter(chunk);
+        if (lastNewline < 0) {
+          return null;
+        }
       }
       offset.set(known + lastNewline + 1);
       return new Chunk(
           relativePath,
           new String(chunk, 0, lastNewline + 1, StandardCharsets.UTF_8),
+          false,
           false,
           false,
           false);

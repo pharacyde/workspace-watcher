@@ -235,6 +235,7 @@ export const FileTailDocument = graphql(`
       reset
       truncated
       gone
+      binary
     }
   }
 `);

@@ -76,7 +76,12 @@ public class EventStore {
   private final BlockingQueue<Stored> pending = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
   private final AtomicLong dropped = new AtomicLong();
 
-  private Connection connection;
+  /**
+   * Volatile: written by open() and by the disable path when a migration did not take, and read
+   * without the lock by enabled() from GraphQL threads.
+   */
+  private volatile Connection connection;
+
   private Runnable unsubscribe;
 
   public EventStore(
@@ -506,6 +511,20 @@ public class EventStore {
       try (PreparedStatement statement =
           connection.prepareStatement("DELETE FROM metric WHERE ts < ?")) {
         statement.setString(1, cutoff);
+        removed += statement.executeUpdate();
+      }
+      // Age alone is not enough here. Resources are sampled on a fixed schedule rather than when
+      // something changes - deliberately, because a steady build keeps the same processes for
+      // minutes and those are the minutes worth looking at - so the table grows whether anything
+      // happens or not: measured at 2833 rows in 2h44m, about 740k a month on one idle watcher.
+      // event has had a row cap for exactly this reason; metric needs the same.
+      try (PreparedStatement statement =
+          connection.prepareStatement(
+              """
+              DELETE FROM metric WHERE id <= (
+                SELECT id FROM metric ORDER BY id DESC LIMIT 1 OFFSET ?)\
+              """)) {
+        statement.setInt(1, props.getMaxStoredMetrics());
         removed += statement.executeUpdate();
       }
       connection.commit();

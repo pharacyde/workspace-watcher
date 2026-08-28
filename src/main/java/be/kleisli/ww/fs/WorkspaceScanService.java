@@ -98,6 +98,9 @@ public class WorkspaceScanService {
       baselineFor = root;
       nextScanAt = 0;
       noticedSlow = false;
+      // Belongs to the tree that was left behind. Kept, it would label the first ordinary save in
+      // the returned-to workspace as a live log, and it would grow with every switch.
+      growthRuns.clear();
     }
     if (System.currentTimeMillis() < nextScanAt) {
       return;

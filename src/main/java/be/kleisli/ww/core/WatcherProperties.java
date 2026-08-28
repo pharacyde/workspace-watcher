@@ -106,6 +106,15 @@ public class WatcherProperties {
    */
   private int maxStoredEvents = 1_000_000;
 
+  /**
+   * Resource samples kept, on top of the age limit.
+   *
+   * <p>Lower than the event cap because a sample is written on a schedule rather than when
+   * something happens, so the count says nothing about how much went on. Two hundred thousand is
+   * roughly a week at the current rate, which is longer than anyone scrolls a CPU chart back.
+   */
+  private int maxStoredMetrics = 200_000;
+
   /** How often the spool directory is drained. Cheap: the directory is normally empty. */
   private long spoolPollMs = 200;
 
@@ -235,6 +244,14 @@ public class WatcherProperties {
 
   public void setMaxSessions(int maxSessions) {
     this.maxSessions = maxSessions;
+  }
+
+  public int getMaxStoredMetrics() {
+    return maxStoredMetrics;
+  }
+
+  public void setMaxStoredMetrics(int maxStoredMetrics) {
+    this.maxStoredMetrics = maxStoredMetrics;
   }
 
   public int getMaxStoredEvents() {

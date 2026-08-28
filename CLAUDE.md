@@ -120,6 +120,14 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
   returning null there throws inside Reactor - which `onErrorResume` then reported as "the file is
   gone". Every quiet file announced its own disappearance after one poll. Use `handle` and only
   call `sink.next` when there is something.
+- **A collapsed row may only fold events with the same attribution.** Source, type, path and summary
+  are not enough: two subagents each reading the same file folded into one row carrying the second
+  one's name, so the row stated an attribution that was wrong for half of what it stood for. The
+  session, agent, subagent and MCP server are part of what makes two rows the same.
+- **A subscription for a file that is not there must end.** `more()` returned a `gone` chunk on every
+  poll, so clicking a `DELETED` row re-rendered the panel 2.5 times a second for as long as it
+  stayed open. `takeUntil` on `gone` or `binary`. The unit test hid this with `.take(1)` — a test
+  that bounds what it reads cannot see that the source never stops.
 - **Consecutive identical rows collapse into one with a counter.** A file being written to produces
   one event per scan, all saying the same thing; twenty of them push everything else off the screen
   while adding nothing. Only consecutive ones fold, so a collapsed row still sits where its first
@@ -144,7 +152,7 @@ LTS the build targets and the minimum the README promises — and runs the tests
 because that is the platform the process layer is written against and a green Linux build says
 less here than it usually would. Standard runners are free on public repositories.
 
-`mvn test`. 133 tests, deliberately aimed at the parsers and at the failure modes this project has
+`mvn test`. 142 tests, deliberately aimed at the parsers and at the failure modes this project has
 actually hit rather than at a coverage number. `GitServiceTest.resolvesVersionsFromASubdirectoryWorkspace`
 is the regression test for the worst bug so far and should not be deleted.
 
@@ -247,6 +255,10 @@ own `~/.claude`.
 - **Consumption against subscription limits is not knowable locally.** Claude Code keeps no record
   of it; its own `/usage` fetches it live with the account credential. Rolling-window token totals
   are the honest local approximation. Do not reach for that credential to fill the gap.
+- **`metric` needs a row cap, not only an age limit.** Resource samples are written on a schedule
+  rather than when something changes - deliberately, so a steady build still produces a series - so
+  the table grows whether anything happens or not: 2833 rows in 2h44m, roughly 740k a month on an
+  idle watcher. `event` has had a cap for the same reason all along.
 - **Recording must never slow a collector.** `EventStore` queues and flushes on a scheduler, and
   drops the newest events if the queue fills rather than blocking. It also subscribes to the bus
   instead of the bus knowing about it, so storage stays invisible to the thing being stored.

@@ -40,7 +40,11 @@ public class UsageService {
   public record ModelUsage(String model, TokenUsage tokens, Double costUsd) {}
 
   /**
-   * {@code costUsd} is null when any model involved has no price, rather than a confident zero.
+   * {@code costUsd} prices what it can and {@code unpricedModels} names what it could not.
+   *
+   * <p>Voiding the whole total over one unknown model hid the cost of every other, and a locally
+   * run model - the common case here - costs nothing anyway. This said the opposite until the
+   * behaviour changed underneath it, which is the kind of comment a reader trusts first.
    *
    * <p>{@code billedPerToken} says whether that figure is money anyone actually pays. On a
    * subscription it is not: it is what these tokens would have cost at API rates, which measures
@@ -122,10 +126,14 @@ public class UsageService {
    * and belong on that session's bill.
    */
   private static String sessionFor(Path transcript) {
-    String name = transcript.getFileName().toString();
-    if (name.startsWith("agent-")) {
+    // Decided by where the file sits, not by what it is called. A session transcript that happens
+    // to be named agent-....jsonl would otherwise be filed under a session that does not exist and
+    // its tokens would vanish from every per-session bill.
+    Path parent = transcript.getParent();
+    if (parent != null && "subagents".equals(parent.getFileName().toString())) {
       return TranscriptLocator.sessionOf(transcript);
     }
+    String name = transcript.getFileName().toString();
     return name.endsWith(".jsonl") ? name.substring(0, name.length() - ".jsonl".length()) : name;
   }
 

@@ -110,7 +110,16 @@ public class TranscriptTailService {
       baselineWorkspace = workspace;
       baselineTaken = true;
     }
-    for (Path file : locator.tailable()) {
+    List<Path> files = locator.tailable();
+    // The locator reads the active workspace again, and a switch lands on a GraphQL thread by way
+    // of the hook mutation. If it moved between the two reads, baseline says "known project" while
+    // the list describes a new one - none of it in offsets, so every transcript would be read from
+    // byte 0. Skipping the round costs 500 ms and the next one baselines properly.
+    if (!java.util.Objects.equals(active.get(), workspace)) {
+      baselineTaken = false;
+      return;
+    }
+    for (Path file : files) {
       tail(file, baseline);
     }
   }

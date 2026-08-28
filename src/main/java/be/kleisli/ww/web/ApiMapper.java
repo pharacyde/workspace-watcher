@@ -126,6 +126,7 @@ public class ApiMapper {
         .reset(chunk.reset())
         .truncated(chunk.truncated())
         .gone(chunk.gone())
+        .binary(chunk.binary())
         .build();
   }
 

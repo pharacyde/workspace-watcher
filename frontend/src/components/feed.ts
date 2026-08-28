@@ -53,7 +53,16 @@ function collapse(events: Event[]): Row[] {
       last.event.source === event.source &&
       last.event.type === event.type &&
       last.event.path === event.path &&
-      last.event.summary === event.summary
+      last.event.summary === event.summary &&
+      // Attribution is part of what makes two rows the same. Without this, two subagents each
+      // reading the same file fold into one row carrying the second one's name - a row that then
+      // states an attribution which is wrong for half of what it stands for, which is the one
+      // thing this project is built not to do. It also hid that the session filter would have
+      // separated them.
+      last.event.sessionId === event.sessionId &&
+      last.event.agent === event.agent &&
+      last.event.subagent === event.subagent &&
+      last.event.mcpServer === event.mcpServer
     ) {
       // The newest one is kept, so the timestamp on the row is when it last happened.
       last.event = event;
