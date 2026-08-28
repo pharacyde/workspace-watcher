@@ -241,7 +241,19 @@ export class Feed extends LitElement {
     // With the scroller attribute set, this element is the scroll container, so this is direct.
     await list.layoutComplete;
     if (!this.follow) return;
-    list.scrollTop = list.scrollHeight;
+
+    // Scrolling once is not enough. The virtualizer re-measures rows after layoutComplete has
+    // resolved, so the height we just scrolled to can already be stale - most visibly when the
+    // wrap toggle changes every row's height at once, which left the feed hundreds of pixels
+    // short of the end. So scroll, let a frame pass, and scroll again until the height settles.
+    // Bounded, and it stops on its own as soon as two frames agree.
+    let previous = -1;
+    for (let attempt = 0; attempt < 5 && list.scrollHeight !== previous; attempt++) {
+      previous = list.scrollHeight;
+      list.scrollTop = list.scrollHeight;
+      await new Promise(requestAnimationFrame);
+      if (!this.follow) return;
+    }
   }
 
   updated(changed: Map<string, unknown>) {
