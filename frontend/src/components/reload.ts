@@ -3,6 +3,7 @@ import { request } from '../api/client';
 import { StatusDocument } from '../api/documents';
 
 const CHECK_MS = 5000;
+const RELOADED_KEY = 'ww-reloaded-after-preload-error';
 
 /**
  * Notices when the frontend has been rebuilt.
@@ -47,13 +48,37 @@ export class Reload extends LitElement {
     this.check();
     this.timer = window.setInterval(() => this.check(), CHECK_MS);
     document.addEventListener('visibilitychange', this.onVisibility);
+    window.addEventListener('vite:preloadError', this.onPreloadError);
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     if (this.timer) clearInterval(this.timer);
     document.removeEventListener('visibilitychange', this.onVisibility);
+    window.removeEventListener('vite:preloadError', this.onPreloadError);
   }
+
+  /**
+   * A lazily-loaded chunk that is no longer on the server.
+   *
+   * <p>Asset names carry a content hash, so a rebuild replaces them. A tab holding the old page
+   * only finds out when it reaches for a chunk it has not loaded yet - Monaco, on the first click
+   * of a file - and fails with "Importing a module script failed". Polling cannot prevent that: the
+   * click can come before the next check.
+   *
+   * <p>Reloading immediately is right here, because the page is already broken. Guarded against
+   * looping: if a reload does not fix it, the problem is not staleness and reloading forever would
+   * only hide the real error.
+   */
+  private onPreloadError = (event: Event) => {
+    event.preventDefault();
+    if (sessionStorage.getItem(RELOADED_KEY)) {
+      this.stale = true;
+      return;
+    }
+    sessionStorage.setItem(RELOADED_KEY, '1');
+    location.reload();
+  };
 
   private onVisibility = () => {
     if (this.stale && document.hidden) location.reload();
@@ -64,6 +89,8 @@ export class Reload extends LitElement {
       const { status } = await request(StatusDocument);
       if (this.known === null) {
         this.known = status.buildId;
+        // A build that loads cleanly clears the guard, so a later stale chunk can reload again.
+        sessionStorage.removeItem(RELOADED_KEY);
         return;
       }
       if (status.buildId === this.known || this.stale) return;

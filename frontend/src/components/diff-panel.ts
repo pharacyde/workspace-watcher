@@ -241,7 +241,12 @@ export class DiffPanel extends LitElement {
         previous?.modified.dispose();
       })
       .catch((error: Error) => {
-        if (this.path === requested) this.message = error.message;
+        if (this.path !== requested) return;
+        // The editor is loaded on demand, so a rebuild can leave its chunk missing. Saying so is
+        // more use than "Importing a module script failed", which names no cause and no cure.
+        this.message = /import|module script|Failed to fetch/i.test(error.message)
+          ? 'the dashboard was rebuilt; reload the page to load the editor'
+          : error.message;
       });
   }
 

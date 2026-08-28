@@ -103,6 +103,11 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
 - **Rebuild the editor whenever the panel returns from an event to a diff.** The container is a
   fresh node by then; guarding only on `path` changing left an editor attached to a detached node
   and an empty panel for a file that had worked a moment earlier.
+- **A stale tab fails at the dynamic import, not at the poll.** Asset names carry a content hash
+  and `emptyOutDir` removes the old ones, so a tab holding the previous page only finds out when it
+  reaches for a chunk it has not loaded yet — Monaco, on the first click of a file. Polling cannot
+  prevent it because the click can come first, so `vite:preloadError` reloads immediately, guarded
+  by a sessionStorage flag against looping when the failure is not staleness.
 - **`index.html` is served `no-store`, assets `max-age=31536000`.** Asset names carry a content
   hash so they can be cached hard; the file that names them cannot, or a browser keeps loading an
   old bundle after a rebuild — which is indistinguishable from a broken feature and cost one real
