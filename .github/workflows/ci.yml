@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push supersedes a run still in progress on the same branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Both JDKs the README promises. 26 is what development happens on; 25 is the LTS the build
+    # targets with `release 25`, and until this runs that claim is untested.
+    name: build (JDK ${{ matrix.java }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ['25', '26']
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+
+      # The frontend build downloads its own pinned node, so the version installed on the runner is
+      # irrelevant. Caching it keeps that download off every run.
+      - name: Cache the frontend toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            frontend/node
+            frontend/node_modules
+          key: frontend-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json', 'pom.xml') }}
+          restore-keys: frontend-${{ runner.os }}-
+
+      # verify runs the whole thing: google-java-format check, tests, the Vite build, and the jar.
+      - name: Build and verify
+        run: mvn --batch-mode --no-transfer-progress verify
+
+      - name: Upload the jar
+        if: matrix.java == '26'
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-watcher
+          path: target/*.jar
+          retention-days: 7
+
+  macos:
+    # The target platform. Process discovery goes through lsof and the whole design is written
+    # against macOS behaviour, so a green Linux build says less here than it usually would.
+    # Standard runners are free on public repositories, including macOS.
+    name: test on macOS
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '26'
+          cache: maven
+
+      # Skips the frontend: it is platform-independent and the Linux job already builds it.
+      - name: Test
+        run: mvn --batch-mode --no-transfer-progress -DskipFrontend verify
+
+      - name: Check the watcher actually starts and answers
+        run: |
+          java -jar target/*.jar --watcher.workspace="$PWD" &
+          for i in $(seq 1 30); do
+            if curl -sf -o /dev/null http://127.0.0.1:8080/graphql \
+                 -H 'Content-Type: application/json' \
+                 -d '{"query":"{status{os}}"}'; then
+              echo "watcher answered after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "watcher did not answer within 30s"
+          exit 1

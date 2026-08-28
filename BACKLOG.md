@@ -188,12 +188,13 @@ Transcripts distinguish sidechains (subagents) and MCP tool calls. Showing a sub
 lane, and MCP servers as their own actors, is nearly free and is exactly the "black box" the tool
 exists to open.
 
-**P9-07 Tests and CI** 🟡 tests done, CI still to do
+**P9-07 Tests and CI** ✅
 *27 tests covering the parsers and the bug classes this project actually hit: the git path
 resolution that broke when the workspace is a subdirectory, transcript tailing across partial lines
 and multi-byte characters and truncation, `lsof` output including a sibling directory that merely
 shares a prefix, hook payloads that are malformed or enormous, and an event stream that replays
-history then goes live without a gap, a duplicate, or an unbounded buffer. No CI pipeline yet.*
+history then goes live without a gap, a duplicate, or an unbounded buffer. CI builds on JDK 25 and
+26, runs the tests on macOS, and checks that the jar actually starts and answers a query.*
 
 **P9-08 Packaging** 🟢
 A single runnable jar exists. A Homebrew formula and a `docker run` recipe are what make it

@@ -87,7 +87,13 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
 - **`frontend/.npmrc` pins the public registry** so a corporate mirror, which typically lags npmjs
   by a patch, cannot make the lockfile unresolvable on someone else's machine.
 
-## Tests
+## Tests and CI
+
+`mvn verify` runs what CI runs: Spotless, the tests, the frontend build, and the jar. CI
+(`.github/workflows/ci.yml`) builds on JDK 25 and 26 — 26 is what development happens on, 25 is the
+LTS the build targets and the minimum the README promises — and runs the tests on macOS as well,
+because that is the platform the process layer is written against and a green Linux build says
+less here than it usually would. Standard runners are free on public repositories.
 
 `mvn test`. 27 tests, deliberately aimed at the parsers and at the failure modes this project has
 actually hit rather than at coverage. `GitServiceTest.resolvesVersionsFromASubdirectoryWorkspace`

@@ -1,5 +1,7 @@
 # workspace-watcher
 
+[![CI](https://github.com/pharacyde/workspace-watcher/actions/workflows/ci.yml/badge.svg)](https://github.com/pharacyde/workspace-watcher/actions/workflows/ci.yml)
+
 See what an AI agent is actually doing in your project — every command it runs, every file it
 touches, and the diff it just wrote — from a browser, without touching the agent's terminal.
 
@@ -282,6 +284,12 @@ removed by sequence number: a duplicate is cheap, a gap is not.
 
 [BACKLOG.md](BACKLOG.md) holds the full feature backlog, with each item marked feasible, needing a
 reframe, or blocked, and why.
+
+## Contributing
+
+`mvn verify` runs everything CI runs: `google-java-format` through Spotless, the tests, the frontend
+build, and the jar. CI additionally builds on JDK 25 as well as 26, and runs the tests on macOS —
+the platform the process layer is actually written against.
 
 ## License
 
