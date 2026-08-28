@@ -226,3 +226,15 @@ export const FileVersionsDocument = graphql(`
     }
   }
 `);
+
+export const FileTailDocument = graphql(`
+  subscription FileTail($path: String!) {
+    fileTail(path: $path) {
+      path
+      text
+      reset
+      truncated
+      gone
+    }
+  }
+`);

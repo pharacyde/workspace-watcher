@@ -118,6 +118,17 @@ public class ApiMapper {
         .build();
   }
 
+  public be.kleisli.ww.generated.types.FileChunk toFileChunk(
+      be.kleisli.ww.fs.FileTailService.Chunk chunk) {
+    return be.kleisli.ww.generated.types.FileChunk.newBuilder()
+        .path(chunk.path())
+        .text(chunk.text())
+        .reset(chunk.reset())
+        .truncated(chunk.truncated())
+        .gone(chunk.gone())
+        .build();
+  }
+
   public List<be.kleisli.ww.generated.types.TokenBucket> toTokenActivity(
       List<be.kleisli.ww.usage.UsageService.Bucket> buckets) {
     return buckets.stream()

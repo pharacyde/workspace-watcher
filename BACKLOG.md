@@ -225,6 +225,16 @@ blijft streng, zodat een echte fout daar nog steeds de applicatie tegenhoudt. Ge
 met de oude vorm. `attributionSkill` wordt nu ook gelezen. De rest van de `attribution*`-velden
 blijft open.*
 
+**P10-15 Bestandsinhoud en live logs in het inspectiepaneel** ✅
+*Een bestand kiezen in de activity toonde tot nu alleen het event-record; de inhoud kwam er nooit in.
+`fileTail` is één subscription voor twee vragen: een statisch bestand komt in één chunk en zwijgt,
+een log blijft komen — dus is er geen regel nodig die de twee uit elkaar houdt op basis van de
+extensie, wat een regel zou zijn die soms fout is over iets wat de server gewoon kan antwoorden. Een
+bestand dat bij twee opeenvolgende scans groeit krijgt het type `APPENDED` en een `live`-chip in de
+feed. Opeenvolgende identieke rijen vouwen samen tot één met een teller, want 25 losse regels over
+hetzelfde logbestand duwen alles anders van het scherm. Paden buiten de workspace worden geweigerd:
+loopback-only is geen reden om te serveren wat er gevraagd wordt.*
+
 **P10-03 Duur per tool-call en per beurt** 🟢
 *De feed zegt wát er draaide en niet wat het kostte, terwijl dat in grote Maven-projecten de vraag is
 waar het uur heen ging. `TranscriptTailService` koppelt `tool_use.id` al aan `tool_result.tool_use_id`

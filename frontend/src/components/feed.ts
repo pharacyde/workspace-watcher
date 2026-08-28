@@ -27,6 +27,44 @@ function label(source: Source, type: string): string {
   }
 }
 
+/**
+ * One row of the feed: an event, and how many identical ones followed it without interruption.
+ *
+ * <p>A file being written to produces one event per scan, all saying the same thing about the same
+ * file. Twenty rows of "appended demo-build.log" push everything else off the screen while adding
+ * nothing to what the first one said. A counter says the same thing in one line and keeps the row
+ * where the reader last saw it.
+ */
+type Row = { event: Event; repeats: number };
+
+/**
+ * Folds a run of identical events into one row.
+ *
+ * <p>Only consecutive ones: any other event ends the run and the next repeat starts a new row. That
+ * keeps the order of the chronicle intact - a collapsed row still sits exactly where its first
+ * event happened, and never absorbs something that happened after a different event.
+ */
+function collapse(events: Event[]): Row[] {
+  const rows: Row[] = [];
+  for (const event of events) {
+    const last = rows[rows.length - 1];
+    if (
+      last &&
+      last.event.source === event.source &&
+      last.event.type === event.type &&
+      last.event.path === event.path &&
+      last.event.summary === event.summary
+    ) {
+      // The newest one is kept, so the timestamp on the row is when it last happened.
+      last.event = event;
+      last.repeats++;
+    } else {
+      rows.push({ event, repeats: 1 });
+    }
+  }
+  return rows;
+}
+
 export class Feed extends LitElement {
   static properties = {
     hidden_: { state: true },
@@ -128,6 +166,19 @@ export class Feed extends LitElement {
       .chip.sub {
         color: var(--add);
       }
+      /* A file something is still writing to. Worth the colour: it is the row where opening the
+         panel gives you a log that keeps arriving rather than a file that sits there. */
+      .chip.live {
+        color: var(--warn);
+      }
+      .repeats {
+        margin-left: 6px;
+        padding: 0 4px;
+        border-radius: 8px;
+        background: var(--line);
+        color: var(--dim);
+        font-size: 11px;
+      }
       lit-virtualizer {
         height: 100%;
       }
@@ -183,7 +234,8 @@ export class Feed extends LitElement {
     hidden: Set<Source>;
     session: string;
     search: string;
-    result: Event[];
+    result: Row[];
+    events: number;
   } | null = null;
 
   constructor() {
@@ -290,7 +342,7 @@ export class Feed extends LitElement {
       .catch(() => (this.replayed = []));
   }
 
-  private visibleEvents(): Event[] {
+  private visibleEvents(): Row[] {
     const items = this.replay ? this.replayed : this.log.items;
     if (
       this.cache &&
@@ -314,14 +366,16 @@ export class Feed extends LitElement {
           (event.summary ?? '').toLowerCase().includes(needle) ||
           (event.path ?? '').toLowerCase().includes(needle)),
     );
+    const rows = collapse(result);
     this.cache = {
       items: source,
       hidden: this.hidden_,
       session: this.session,
       search: this.search,
-      result,
+      result: rows,
+      events: result.length,
     };
-    return result;
+    return rows;
   }
 
   private sessionPicker() {
@@ -354,7 +408,7 @@ export class Feed extends LitElement {
     return html`
       <h2>
         ${this.replay ? 'Replay' : 'Activity'}
-        <span class="count">${visible.length.toLocaleString()}</span>
+        <span class="count">${(this.cache?.events ?? visible.length).toLocaleString()}</span>
         ${this.replay
           ? html`<span class="replaying"
               >${new Date(this.replay.since).toLocaleTimeString('en-GB', { hour12: false })}</span
@@ -408,12 +462,12 @@ export class Feed extends LitElement {
                 @touchmove=${this.onUserScroll}
                 @keydown=${this.onUserScroll}
                 .items=${visible}
-                .renderItem=${(event: Event | undefined) =>
+                .renderItem=${(row: Row | undefined) => {
                   // The virtualizer can ask for an index the list no longer has, in the frame
                   // where switching between live and replay swaps the array underneath it.
-                  !event
-                    ? html``
-                    : html`
+                  if (!row) return html``;
+                  const event = row.event;
+                  return html`
                   <div
                     class="rowline ${event.type === 'TOOL_ERROR' ? 'error' : ''} ${event.source} ${this.wrap ? 'wrapped' : ''}"
                     style="cursor:pointer"
@@ -433,14 +487,21 @@ export class Feed extends LitElement {
                     <span class="msg ${this.wrap ? '' : 'ellipsis'}">
                       ${event.mcpServer
                         ? html`<span class="chip mcp">mcp:${event.mcpServer}</span>`
+                        : ''}${event.type === 'APPENDED'
+                        ? html`<span class="chip live">live</span>`
                         : ''}${event.subagent
                         ? html`<span class="chip sub">agent:${event.subagent}</span>`
                         : ''}${event.agent
                         ? html`<span class="agent">${event.agent} </span>`
-                        : ''}${event.summary}
+                        : ''}${event.summary}${row.repeats > 1
+                        ? html`<span class="repeats" title="the same thing, this many times in a row"
+                            >×${row.repeats}</span
+                          >`
+                        : ''}
                     </span>
                         </div>
-                      `}
+                      `;
+                }}
               ></lit-virtualizer>
             `}
       </div>

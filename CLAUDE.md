@@ -112,6 +112,18 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
   hash so they can be cached hard; the file that names them cannot, or a browser keeps loading an
   old bundle after a rebuild — which is indistinguishable from a broken feature and cost one real
   bug report that a hard refresh "fixed".
+- **A `<pre>` in a scrolling parent grows instead of scrolling.** `.event-body` is the scroll
+  container, so the file view's `<pre>` reached full content height and following it had nothing to
+  scroll - the toggle was on and did nothing. The body becomes a flex column and the child gets
+  `min-height: 0`. Same shape as the Monaco case below: constrain the child, not the page.
+- **`Flux.map` may not return null.** A poll that found nothing new has nothing to emit, and
+  returning null there throws inside Reactor - which `onErrorResume` then reported as "the file is
+  gone". Every quiet file announced its own disappearance after one poll. Use `handle` and only
+  call `sink.next` when there is something.
+- **Consecutive identical rows collapse into one with a counter.** A file being written to produces
+  one event per scan, all saying the same thing; twenty of them push everything else off the screen
+  while adding nothing. Only consecutive ones fold, so a collapsed row still sits where its first
+  event happened. The header keeps counting events, not rows.
 - **Monaco needs its stylesheet adopted into the shadow root.** Vite bundles the CSS Monaco's
   modules import into the *document* stylesheet, which a shadow root cannot see. Without
   `monacoStyleSheet()` the editor renders unstyled and the panel grows to full content height -
@@ -132,7 +144,7 @@ LTS the build targets and the minimum the README promises — and runs the tests
 because that is the platform the process layer is written against and a green Linux build says
 less here than it usually would. Standard runners are free on public repositories.
 
-`mvn test`. 122 tests, deliberately aimed at the parsers and at the failure modes this project has
+`mvn test`. 133 tests, deliberately aimed at the parsers and at the failure modes this project has
 actually hit rather than at a coverage number. `GitServiceTest.resolvesVersionsFromASubdirectoryWorkspace`
 is the regression test for the worst bug so far and should not be deleted.
 
@@ -166,6 +178,15 @@ own `~/.claude`.
   while Spring Boot 4.1.1 manages 2.10.0. Without the override the context fails to start.
 - **Do not mix DGS and Spring for GraphQL annotations.** Netflix's own guidance is explicit that
   some features do not work across both models. Everything here is DGS.
+- **A file growing on two consecutive scans is `APPENDED`, not `MODIFIED`.** One growth is a save -
+  an editor writes a file out in one jump - and only something still writing keeps growing while
+  nobody touches it. That is the row worth pointing at, because it is the one where opening the
+  panel gives you a log that keeps arriving. Carried in the event type rather than a new field, so
+  it costs nothing in the schema or the database.
+- **`lsof` would answer a different question here.** It says a file is open for writing, which is
+  not the same as being written to: measured, a shell appending with `>>` reopens the file per line
+  and never appears in `lsof` at all, while a long-running build does. It would add which process
+  is writing, which growth detection cannot - worth having as a complement, not as a replacement.
 - **The scanner sets its own pace.** Workspaces are discovered, so landing on a huge tree is a
   normal accident rather than user error. The interval is derived from the measured walk duration
   at a tenth duty cycle; a fixed interval cost 30-85% of a core on a 66,000-file tree.

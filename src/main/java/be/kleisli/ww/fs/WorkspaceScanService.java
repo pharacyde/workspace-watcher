@@ -63,6 +63,16 @@ public class WorkspaceScanService {
   private static final long SLOW_SCAN_NOTICE_MS = 5_000;
 
   private Map<Path, Stamp> previous;
+
+  /**
+   * How many scans in a row a file has grown by.
+   *
+   * <p>Two in a row is what separates a log from a save. Every editor write is one jump in size;
+   * something being appended to keeps growing while nobody touches it, and that is the file worth
+   * pointing at - it is the one where following it means something.
+   */
+  private final Map<Path, Integer> growthRuns = new HashMap<>();
+
   private Path baselineFor;
   private long nextScanAt;
   private boolean noticedSlow;
@@ -142,11 +152,20 @@ public class WorkspaceScanService {
         created.add(entry.getKey());
       } else if (!before.equals(entry.getValue())) {
         modified.add(entry.getKey());
+        if (entry.getValue().size() > before.size()) {
+          growthRuns.merge(entry.getKey(), 1, Integer::sum);
+        } else {
+          growthRuns.put(entry.getKey(), 0);
+        }
+      } else {
+        // Unchanged: whatever was writing to it has stopped, so it is no longer a live log.
+        growthRuns.remove(entry.getKey());
       }
     }
     for (Path gone : previous.keySet()) {
       if (!current.containsKey(gone)) {
         deleted.add(gone);
+        growthRuns.remove(gone);
       }
     }
 
@@ -173,10 +192,20 @@ public class WorkspaceScanService {
               .path(root.toString()));
     } else {
       created.forEach(file -> emit("CREATED", root, file));
-      modified.forEach(file -> emit("MODIFIED", root, file));
+      // APPENDED rather than MODIFIED for a file that keeps growing: it is the same fact with the
+      // part that matters kept, and the reader can then see at a glance which row is a log being
+      // written right now and worth opening to follow.
+      modified.forEach(file -> emit(appending(file) ? "APPENDED" : "MODIFIED", root, file));
       deleted.forEach(file -> emit("DELETED", root, file));
     }
     git.refresh();
+  }
+
+  /**
+   * Grown on at least two consecutive scans, so something is writing to it rather than saving it.
+   */
+  private boolean appending(Path file) {
+    return growthRuns.getOrDefault(file, 0) >= 2;
   }
 
   private void emit(String type, Path root, Path file) {

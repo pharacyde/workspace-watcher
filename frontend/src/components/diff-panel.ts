@@ -1,11 +1,14 @@
 import { css, html, LitElement } from 'lit';
-import { request } from '../api/client';
-import { FileVersionsDocument } from '../api/documents';
+import { request, subscribe } from '../api/client';
+import { FileTailDocument, FileVersionsDocument } from '../api/documents';
 import type { EventsSubscription } from '../gql/graphql';
 import { panelStyles } from '../styles';
 import { languageFor, loadMonaco, monacoStyleSheet, type DiffEditor } from './monaco';
 
 type FeedEvent = EventsSubscription['events'];
+
+/** How much of a file to keep in the browser. The end is the part being watched. */
+const CONTENT_LIMIT = 400_000;
 
 /**
  * Pretty-prints and colours a body that turns out to be JSON, and leaves everything else alone.
@@ -62,6 +65,10 @@ export class DiffPanel extends LitElement {
   static properties = {
     path: { type: String },
     event: { attribute: false },
+    view: { state: true },
+    content: { state: true },
+    contentNote: { state: true },
+    following: { state: true },
     message: { state: true },
     wrap: { state: true },
   };
@@ -69,6 +76,15 @@ export class DiffPanel extends LitElement {
   declare path: string | null;
   /** When set, the panel inspects this event instead of diffing a file. */
   declare event: FeedEvent | null;
+  /** For an event that names a file: its content, or the event's own record. */
+  declare private view: 'content' | 'record';
+  declare private content: string;
+  declare private contentNote: string | null;
+  declare private following: boolean;
+
+  private fileSubscription?: () => void;
+  /** The path the running subscription is for, so an unchanged selection is not resubscribed. */
+  private followed: string | null = null;
   declare private message: string | null;
   declare private wrap: boolean;
 
@@ -86,6 +102,33 @@ export class DiffPanel extends LitElement {
       .monaco {
         height: 100%;
         width: 100%;
+      }
+      /* The body is the scroll container by default, which makes a <pre> inside it grow to its
+         full content height instead of scrolling - so following it had nothing to scroll and the
+         toggle looked broken. Same shape as the Monaco case: constrain the child, not the page. */
+      .event-body.file {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .content {
+        flex: 1;
+        min-height: 0;
+        margin: 0;
+        padding: 6px 10px;
+        overflow: auto;
+        font: 12px/1.45 var(--mono);
+        color: var(--fg);
+      }
+      .content.wrap {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .content.nowrap {
+        white-space: pre;
+      }
+      h2 .switch {
+        margin-left: auto;
       }
       .event-body {
         overflow: auto;
@@ -159,11 +202,68 @@ export class DiffPanel extends LitElement {
     this.event = null;
     this.message = 'select a row or a file to inspect it';
     this.wrap = false;
+    this.view = 'content';
+    this.content = '';
+    this.contentNote = null;
+    this.following = true;
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.disposeEditor();
+    this.stopFollowing();
+  }
+
+  private stopFollowing() {
+    this.fileSubscription?.();
+    this.fileSubscription = undefined;
+    this.followed = null;
+  }
+
+  /**
+   * Follows the file an event names.
+   *
+   * <p>One subscription covers both kinds of file, which is why there is no rule here for telling
+   * them apart: a source file arrives in one chunk and nothing follows it, a log keeps arriving.
+   * Guessing from the extension would be a rule that is sometimes wrong about a file the server can
+   * simply answer for.
+   */
+  private follow(path: string) {
+    if (this.followed === path) return;
+    this.stopFollowing();
+    this.followed = path;
+    this.content = '';
+    this.contentNote = null;
+    // A new file starts followed: opening a log to watch it is the reason to open it, and having
+    // to switch that back on for every file is the kind of state nobody wants remembered.
+    this.following = true;
+    this.fileSubscription = subscribe(
+      FileTailDocument,
+      ({ fileTail }) => {
+        if (this.followed !== path) return;
+        if (fileTail.gone) {
+          this.content = '';
+          this.contentNote = 'no such file in this workspace';
+          return;
+        }
+        this.contentNote = fileTail.truncated ? 'showing the end of the file' : null;
+        const next = fileTail.reset ? fileTail.text : this.content + fileTail.text;
+        // Capped from the front: a build log outgrows any browser, and it is the end that is
+        // being watched. Cutting at a line boundary keeps the first visible line whole.
+        this.content = next.length > CONTENT_LIMIT
+          ? next.slice(next.indexOf('\n', next.length - CONTENT_LIMIT) + 1)
+          : next;
+        void this.scrollContentToEnd();
+      },
+      { path },
+    );
+  }
+
+  private async scrollContentToEnd() {
+    if (!this.following) return;
+    await this.updateComplete;
+    const pre = this.renderRoot.querySelector<HTMLElement>('.content');
+    if (pre) pre.scrollTop = pre.scrollHeight;
   }
 
   /**
@@ -184,7 +284,17 @@ export class DiffPanel extends LitElement {
   }
 
   updated(changed: Map<string, unknown>) {
+    if (this.event?.path && this.view === 'content') {
+      this.follow(this.event.path);
+    } else if (!this.event) {
+      this.stopFollowing();
+    }
     if (!changed.has('path') && !changed.has('event')) return;
+    if (changed.has('event')) {
+      // A new selection starts on the file, not on the record: selecting a file is a request to
+      // see what is in it.
+      this.view = 'content';
+    }
     if (this.event) {
       // Showing an event means the diff container has left the DOM. Holding on to an editor
       // attached to a detached node is what made returning to the same file show an empty panel:
@@ -289,11 +399,52 @@ export class DiffPanel extends LitElement {
     );
   }
 
+  private renderContent(path: string) {
+    return html`
+      <div class="meta">
+        <span class="tag">file</span>
+        <span>${path}</span>
+        <button class=${this.following ? 'on' : ''} @click=${() => this.toggleFollowing()}>
+          ${this.following ? '⤓ follow' : '⤓ follow off'}
+        </button>
+        <button class=${this.wrap ? 'on' : ''} @click=${() => (this.wrap = !this.wrap)}>
+          ${this.wrap ? '⏎ wrap on' : '⏎ wrap off'}
+        </button>
+        <button @click=${() => this.showDiffFor(path)}>diff this file</button>
+      </div>
+      ${this.contentNote ? html`<p class="empty">${this.contentNote}</p>` : ''}
+      ${this.content
+        ? html`<pre class="content ${this.wrap ? 'wrap' : 'nowrap'}">${this.content}</pre>`
+        : this.contentNote
+          ? ''
+          : html`<p class="empty">reading…</p>`}
+    `;
+  }
+
+  private toggleFollowing() {
+    this.following = !this.following;
+    void this.scrollContentToEnd();
+  }
+
   render() {
     if (this.event) {
+      const path = this.event.path;
       return html`
-        <h2>Event<span class="note">${this.event.summary}</span></h2>
-        <div class="body event-body">${this.renderEvent(this.event)}</div>
+        <h2>
+          ${this.view === 'content' && path ? 'File' : 'Event'}
+          <span class="note">${this.view === 'content' && path ? path : this.event.summary}</span>
+          ${path
+            ? html`<button
+                class="switch"
+                @click=${() => (this.view = this.view === 'content' ? 'record' : 'content')}
+              >
+                ${this.view === 'content' ? 'show record' : 'show file'}
+              </button>`
+            : ''}
+        </h2>
+        <div class="body event-body ${this.view === 'content' && path ? 'file' : ''}">
+          ${this.view === 'content' && path ? this.renderContent(path) : this.renderEvent(this.event)}
+        </div>
       `;
     }
     return html`

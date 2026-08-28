@@ -163,4 +163,72 @@ class WorkspaceScanServiceTest {
 
     assertThat(otherBus.replay()).isEmpty();
   }
+
+  @Test
+  @DisplayName("marks a file that keeps growing as being appended to")
+  void marksAGrowingFileAsLive() throws IOException {
+    Path log = workspace.resolve("build.log");
+    Files.writeString(log, "one\n");
+    scanner.scan();
+
+    // Two growths in a row. One is a save - an editor writing a file out is a single jump in size
+    // - and only something still writing keeps growing while nobody touches it.
+    Files.writeString(log, "one\ntwo\n");
+    scanner.scan();
+    int baseline = bus.replay().size();
+    Files.writeString(log, "one\ntwo\nthree\n");
+    scanner.scan();
+
+    assertThat(since(baseline))
+        .anySatisfy(
+            event -> {
+              assertThat(event.type()).isEqualTo("APPENDED");
+              assertThat(event.path()).isEqualTo("build.log");
+            });
+  }
+
+  @Test
+  @DisplayName("calls a single save a modification, not a live log")
+  void oneWriteIsNotALiveLog() throws IOException {
+    Path file = workspace.resolve("Main.java");
+    Files.writeString(file, "class Main {}");
+    scanner.scan();
+    int baseline = bus.replay().size();
+
+    Files.writeString(file, "class Main { void go() {} }");
+    scanner.scan();
+
+    assertThat(since(baseline))
+        .anySatisfy(
+            event -> {
+              assertThat(event.type()).isEqualTo("MODIFIED");
+              assertThat(event.path()).isEqualTo("Main.java");
+            });
+  }
+
+  @Test
+  @DisplayName("stops calling a file live once the writing stops")
+  void growthRunResetsWhenTheFileShrinks() throws IOException {
+    Path log = workspace.resolve("rotated.log");
+    Files.writeString(log, "a\n");
+    scanner.scan();
+    Files.writeString(log, "a\nb\n");
+    scanner.scan();
+    Files.writeString(log, "a\nb\nc\n");
+    scanner.scan();
+
+    // Rotated: the size drops, so the run breaks and the next change is an ordinary one again.
+    Files.writeString(log, "x\n");
+    scanner.scan();
+    int baseline = bus.replay().size();
+    Files.writeString(log, "x\ny\n");
+    scanner.scan();
+
+    assertThat(since(baseline))
+        .anySatisfy(
+            event -> {
+              assertThat(event.type()).isEqualTo("MODIFIED");
+              assertThat(event.path()).isEqualTo("rotated.log");
+            });
+  }
 }

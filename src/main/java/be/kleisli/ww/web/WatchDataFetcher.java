@@ -8,6 +8,7 @@ import be.kleisli.ww.core.ActiveWorkspace;
 import be.kleisli.ww.core.EventBus;
 import be.kleisli.ww.core.WatchEvent;
 import be.kleisli.ww.core.WatcherProperties;
+import be.kleisli.ww.fs.FileTailService;
 import be.kleisli.ww.generated.types.FileVersions;
 import be.kleisli.ww.generated.types.GitSnapshot;
 import be.kleisli.ww.generated.types.GuardConfig;
@@ -60,6 +61,7 @@ public class WatchDataFetcher {
   private final UsageService usage;
   private final EventBus eventBus;
   private final GitService git;
+  private final FileTailService fileTail;
   private final ProcessTreeService processes;
   private final TranscriptTailService transcripts;
   private final ApiMapper mapper;
@@ -77,6 +79,7 @@ public class WatchDataFetcher {
       GitService git,
       ProcessTreeService processes,
       TranscriptTailService transcripts,
+      FileTailService fileTail,
       ApiMapper mapper,
       ObjectMapper objectMapper) {
     this.properties = properties;
@@ -88,6 +91,7 @@ public class WatchDataFetcher {
     this.usage = usage;
     this.eventBus = eventBus;
     this.git = git;
+    this.fileTail = fileTail;
     this.processes = processes;
     this.transcripts = transcripts;
     this.mapper = mapper;
@@ -210,6 +214,18 @@ public class WatchDataFetcher {
   @DgsSubscription
   public Publisher<be.kleisli.ww.generated.types.WatchEvent> events() {
     return eventBus.stream().map(mapper::toEvent);
+  }
+
+  /**
+   * A file's content, then everything appended to it.
+   *
+   * <p>A subscription rather than a query even for a file that never changes: the caller does not
+   * know which kind it has until it has looked, and one shape that covers both is less to get wrong
+   * than two that the client has to choose between.
+   */
+  @DgsSubscription
+  public Publisher<be.kleisli.ww.generated.types.FileChunk> fileTail(@InputArgument String path) {
+    return fileTail.follow(path).map(mapper::toFileChunk);
   }
 
   /** Current working tree. Emits the present value on subscribe, then on every change. */

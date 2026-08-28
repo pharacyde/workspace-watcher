@@ -415,4 +415,29 @@ type Subscription {
 
   "Agent sessions in the watched workspace. Emits the present value on subscribe."
   sessions: [SessionEntry!]!
+
+  """
+  A file's content, then everything appended to it from that point on.
+
+  One subscription for two questions, because the caller should not have to know which kind of file
+  it is holding before it asks: a source file arrives whole and stays put, a log keeps arriving. The
+  path is workspace-relative; anything pointing outside the workspace is answered as missing.
+  """
+  fileTail(path: String!): FileChunk!
+}
+
+"A piece of a file, in the order it was written."
+type FileChunk {
+  path: String!
+  "The content on the first chunk, and whatever was appended on the ones after it."
+  text: String!
+  """
+  Discard what you had. Set on the first chunk, and again if the file is truncated or replaced -
+  what came before then describes a file that no longer exists.
+  """
+  reset: Boolean!
+  "The file was longer than what was sent, and the text starts partway in."
+  truncated: Boolean!
+  "There is no such file, or it is not one we will read."
+  gone: Boolean!
 }
