@@ -230,8 +230,15 @@ type ModelUsage {
 type UsageSummary {
   models: [ModelUsage!]!
   tokens: TokenUsage!
-  "Null when any model involved is unpriced."
+  """
+  Cost of everything that could be priced. Models with no entry in pricing.json are named in
+  unpricedModels rather than voiding the whole figure - one unknown model used to hide the cost of
+  every other, and a locally run model costs nothing anyway.
+  """
   costUsd: Float
+
+  "Models that carried tokens but have no price. Empty when everything is accounted for."
+  unpricedModels: [String!]!
   """
   Whether costUsd is money anyone actually pays.
 

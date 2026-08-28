@@ -4,6 +4,7 @@ import { UsageDocument } from '../api/documents';
 
 type UsageData = {
   costUsd: number | null;
+  unpricedModels: string[];
   billedPerToken: boolean;
   billingMode: string;
   plan: string | null;
@@ -173,6 +174,12 @@ export class UsagePill extends LitElement {
                           : ''}`
                     : html`billed per token at API rates`}
                 </div>
+                ${this.usage.unpricedModels.length
+                  ? html`<div class="note">
+                      not counted: ${this.usage.unpricedModels.join(', ')} — no price in
+                      pricing.json
+                    </div>`
+                  : ''}
                 <div>last 5h · ${compact.format(this.usage.last5h.total)} tokens</div>
                 <div>last 7d · ${compact.format(this.usage.last7d.total)} tokens</div>
               </div>

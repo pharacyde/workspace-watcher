@@ -202,7 +202,13 @@ own `~/.claude`.
   and not a bill. `Billing` detects this from the local config; the UI prefixes it with `≈` and
   spells it out. Showing it bare would be a confident lie, which is the failure mode this whole
   project is built against.
-- **An unpriced model reports null, never zero.**
+- **An unpriced model is named, not zeroed and not fatal.** A model with no entry appears in
+  `unpricedModels` while everything else is still priced. Voiding the whole total over one unknown
+  model hid the cost of every other — and a locally run model, which is the common case here, costs
+  nothing anyway. A model with no tokens is ignored entirely (`<synthetic>`).
+- **Sample resources before comparing the process tree.** A steady build keeps the same processes
+  for minutes, which is exactly when CPU is worth looking at; behind the equality check the series
+  stayed empty during the only periods anyone would examine it.
 - **Consumption against subscription limits is not knowable locally.** Claude Code keeps no record
   of it; its own `/usage` fetches it live with the account credential. Rolling-window token totals
   are the honest local approximation. Do not reach for that credential to fill the gap.

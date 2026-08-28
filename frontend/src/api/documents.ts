@@ -134,6 +134,7 @@ export const UsageDocument = graphql(`
   query Usage($sessionId: String) {
     usage(sessionId: $sessionId) {
       costUsd
+      unpricedModels
       billedPerToken
       billingMode
       plan

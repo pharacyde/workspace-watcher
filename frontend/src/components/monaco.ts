@@ -1,4 +1,5 @@
 import type * as Monaco from 'monaco-editor/editor/editor.api.js';
+import { chunkLoadedSuccessfully } from './reload';
 
 export type DiffEditor = Monaco.editor.IStandaloneDiffEditor;
 
@@ -96,6 +97,8 @@ export async function loadMonaco(): Promise<typeof Monaco> {
       rules: [],
     });
 
+    // The chunk is here, so a reload did fix whatever was stale and the loop guard can be lifted.
+    chunkLoadedSuccessfully();
     return monaco;
   })();
   return loading;

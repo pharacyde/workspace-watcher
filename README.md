@@ -232,6 +232,10 @@ shows tokens used in the last five hours and seven days, which is the shape thos
 How much of an allowance *remains* is not shown, because it is not knowable from this machine:
 Claude Code keeps no local record and fetches it live with the account credential.
 
+What cannot be priced is named rather than hidden: a model with no entry — a locally run one, say —
+is listed as not counted, and everything else is still added up. Voiding the whole figure over one
+unknown model used to hide the cost of every other.
+
 Rates live in `pricing.json` beside the database, seeded from the bundled table. They are a
 snapshot and they change, so the file is meant to be edited. A model with no entry is reported as
 unpriced rather than free.

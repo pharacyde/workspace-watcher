@@ -48,6 +48,7 @@ public class UsageService {
       List<ModelUsage> models,
       TokenUsage tokens,
       Double costUsd,
+      List<String> unpricedModels,
       boolean billedPerToken,
       String billingMode,
       String plan,
@@ -97,25 +98,33 @@ public class UsageService {
 
   private Summary summarise(Map<String, TokenUsage> byModel) {
     List<ModelUsage> models = new ArrayList<>();
+    List<String> unpriced = new ArrayList<>();
     TokenUsage total = TokenUsage.NONE;
     double cost = 0;
-    boolean priced = true;
 
     for (Map.Entry<String, TokenUsage> entry : byModel.entrySet()) {
       Double modelCost = pricing.cost(entry.getKey(), entry.getValue());
       models.add(new ModelUsage(entry.getKey(), entry.getValue(), modelCost));
       total = total.plus(entry.getValue());
-      if (modelCost == null) {
-        priced = false;
-      } else {
+      if (modelCost != null) {
         cost += modelCost;
+        continue;
+      }
+      // A model with no tokens cannot change a total, so it is not worth mentioning. Claude Code
+      // records synthetic assistant messages under "<synthetic>" with an all-zero usage block.
+      if (entry.getValue().total() > 0) {
+        unpriced.add(entry.getKey());
       }
     }
     models.sort(Comparator.comparingLong((ModelUsage m) -> m.tokens().total()).reversed());
+    // What can be priced is priced, and what cannot is named. Collapsing the whole figure to null
+    // because of one unknown model hid the cost of everything else - and a locally run model, which
+    // is the common case here, costs nothing at all.
     return new Summary(
         models,
         total,
-        priced ? cost : null,
+        cost,
+        List.copyOf(unpriced),
         billing.billedPerToken(),
         billing.mode(),
         billing.plan(),

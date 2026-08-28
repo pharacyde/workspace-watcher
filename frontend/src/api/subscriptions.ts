@@ -104,7 +104,12 @@ export class EventLogController<TItem extends { seq: string }> implements Reacti
 
   setPaused(paused: boolean): void {
     this.paused = paused;
-    if (!paused) {
+    if (paused) {
+      // A frame scheduled by an arrival in the same tick would otherwise still run, appending one
+      // batch of rows after the button was pressed.
+      if (this.frame !== null) cancelAnimationFrame(this.frame);
+      this.frame = null;
+    } else {
       this.flush();
     }
     this.host.requestUpdate();
@@ -112,6 +117,7 @@ export class EventLogController<TItem extends { seq: string }> implements Reacti
 
   private flush(): void {
     this.frame = null;
+    if (this.paused) return;
     if (this.pending.length === 0) return;
     this.items = this.items.concat(this.pending);
     this.pending = [];

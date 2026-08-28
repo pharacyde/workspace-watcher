@@ -109,17 +109,44 @@ class UsageServiceTest {
   }
 
   @Test
-  @DisplayName("reports an unknown model as unpriced rather than free")
-  void unknownModelIsUnpriced() throws IOException {
-    // A confident zero for a model nobody has priced yet is worse than admitting it is unknown.
+  @DisplayName("names an unpriced model rather than pricing it at zero")
+  void unknownModelIsNamed() throws IOException {
+    // A confident zero for a model nobody has priced is worse than admitting it is unknown.
     append("claude-from-the-future-9", 1_000_000, 1_000_000, 0, 0, 0);
 
     UsageService.Summary summary = usage.summarise(null);
-    assertThat(summary.costUsd()).isNull();
+    assertThat(summary.unpricedModels()).containsExactly("claude-from-the-future-9");
     assertThat(summary.models())
         .singleElement()
         .extracting(UsageService.ModelUsage::costUsd)
         .isNull();
+  }
+
+  @Test
+  @DisplayName("prices what it can when one model among several is unknown")
+  void pricesTheRestAroundAnUnknownModel() throws IOException {
+    // The old behaviour voided the whole figure, so one locally-run model - which costs nothing -
+    // hid the cost of everything else. Not hypothetical: across this machine's transcripts
+    // Qwen3.6-35B-A3B-4bit appears 145 times.
+    append("claude-opus-5", 1_000_000, 0, 0, 0, 0);
+    append("Qwen3.6-35B-A3B-4bit", 5_000_000, 5_000_000, 0, 0, 0);
+
+    UsageService.Summary summary = usage.summarise(null);
+    assertThat(summary.costUsd()).isCloseTo(5.0, within(0.001));
+    assertThat(summary.unpricedModels()).containsExactly("Qwen3.6-35B-A3B-4bit");
+  }
+
+  @Test
+  @DisplayName("a model with no tokens is not worth mentioning")
+  void ignoresZeroTokenModels() throws IOException {
+    // Claude Code records synthetic assistant messages under "<synthetic>" with an all-zero usage
+    // block. Naming those as unpriced would be noise about nothing.
+    append("claude-opus-5", 1_000_000, 0, 0, 0, 0);
+    append("<synthetic>", 0, 0, 0, 0, 0);
+
+    UsageService.Summary summary = usage.summarise(null);
+    assertThat(summary.unpricedModels()).isEmpty();
+    assertThat(summary.costUsd()).isCloseTo(5.0, within(0.001));
   }
 
   @Test

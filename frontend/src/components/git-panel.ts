@@ -15,6 +15,14 @@ export class GitPanel extends LitElement {
       .rowline {
         cursor: pointer;
       }
+      /* A submodule entry names a repository, not a file. Clicking it asked git to diff a
+         directory and produced an empty panel with no explanation. */
+      .rowline.inert {
+        cursor: default;
+      }
+      .rowline.submodule .st {
+        color: var(--hook);
+      }
       .st {
         width: 74px;
         flex: none;
@@ -74,8 +82,13 @@ export class GitPanel extends LitElement {
               : files.map(
                   (file) => html`
                     <div
-                      class="rowline ${file.status} ${file.path === this.selected ? 'selected' : ''}"
-                      @click=${() => this.select(file.path)}
+                      class="rowline ${file.status} ${file.path === this.selected
+                        ? 'selected'
+                        : ''} ${file.status === 'submodule' ? 'inert' : ''}"
+                      title=${file.status === 'submodule'
+                        ? 'A submodule is a repository of its own; watch it directly to see inside'
+                        : file.path}
+                      @click=${() => file.status !== 'submodule' && this.select(file.path)}
                     >
                       <span class="st">${file.status}</span>
                       <span class="ellipsis">${file.path}</span>

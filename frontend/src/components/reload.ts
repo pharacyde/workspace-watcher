@@ -3,7 +3,18 @@ import { request } from '../api/client';
 import { StatusDocument } from '../api/documents';
 
 const CHECK_MS = 5000;
-const RELOADED_KEY = 'ww-reloaded-after-preload-error';
+export const RELOADED_KEY = 'ww-reloaded-after-preload-error';
+
+/**
+ * Called when a lazily-loaded chunk has actually arrived.
+ *
+ * <p>The guard used to be cleared on the first status poll, which only proves the GraphQL endpoint
+ * answers - it says nothing about whether the chunk loads. A chunk that is genuinely missing rather
+ * than stale would then have reloaded the page on every click, forever.
+ */
+export function chunkLoadedSuccessfully() {
+  sessionStorage.removeItem(RELOADED_KEY);
+}
 
 /**
  * Notices when the frontend has been rebuilt.
@@ -89,8 +100,6 @@ export class Reload extends LitElement {
       const { status } = await request(StatusDocument);
       if (this.known === null) {
         this.known = status.buildId;
-        // A build that loads cleanly clears the guard, so a later stale chunk can reload again.
-        sessionStorage.removeItem(RELOADED_KEY);
         return;
       }
       if (status.buildId === this.known || this.stale) return;

@@ -172,6 +172,7 @@ public class ApiMapper {
                 .toList())
         .tokens(toTokens(summary.tokens()))
         .costUsd(summary.costUsd())
+        .unpricedModels(summary.unpricedModels())
         .billedPerToken(summary.billedPerToken())
         .billingMode(summary.billingMode())
         .plan(summary.plan())

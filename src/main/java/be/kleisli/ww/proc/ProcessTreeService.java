@@ -65,13 +65,18 @@ public class ProcessTreeService {
       return;
     }
     Map<Long, String> inWorkspace = processesWithCwdIn(workspace);
+
+    // Sampled every poll, before the tree is compared. A steady build keeps the same processes for
+    // minutes, so the tree does not change - and that is exactly when CPU is worth a look. Behind
+    // the equality check, the series stayed empty during the only periods anyone would examine it.
+    sampleResources(inWorkspace.keySet(), workspace);
+
     List<Node> tree = buildTree(inWorkspace);
     if (tree.equals(lastTree)) {
       return;
     }
     lastTree = tree;
     stream.publish(new Snapshot(Instant.now().toString(), count(tree), tree));
-    sampleResources(inWorkspace.keySet(), workspace);
   }
 
   /** One {@code lsof} call for all processes, filtered to the workspace subtree. */

@@ -141,6 +141,9 @@ export class App extends LitElement {
     });
     this.addEventListener('event-selected', (event) => {
       this.selectedEvent = (event as CustomEvent<unknown>).detail;
+      // Symmetry with the other direction: without this the working tree kept a file highlighted
+      // as being viewed while the inspector showed an unrelated event.
+      this.selected = null;
     });
     this.releaseConnection = onConnectionState((state) => (this.connection = state));
     this.addEventListener('replay-range', (event) => {
