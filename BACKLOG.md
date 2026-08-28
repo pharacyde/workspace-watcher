@@ -315,6 +315,90 @@ een slash-commando binnen een sessie dat de accountcredential gebruikt, en er is
 cachebestand. De verse waarde is alleen bereikbaar langs de statusLine van P10-12. Dit item bestaat
 om vast te leggen dat de directe route dood is, zodat hij niet nog eens onderzocht wordt.*
 
+## Epic 11 — De dag in commits
+
+*Er gebeurt van alles in een dag, en bij de commit gaat het verloren. Dat is niet een gevoel maar
+letterlijk wat het dashboard doet: het toont uitsluitend het verschil tussen `HEAD` en de schijf, dus
+op het moment dat je commit worden die twee gelijk en is alles weg. Nagemeten op `feed.ts` direct na
+de commit van 29-08: `git diff HEAD` geeft 0 regels, terwijl er in die commit 72 regels bij kwamen en
+11 verdwenen. De feed weet per seconde wat er gebeurde en git bewaart wat ervan overbleef; er is
+alleen nog niets dat die twee aan elkaar knoopt, en na de commit toont het dashboard van geen van
+beide iets.*
+
+**P11-01 Git-tijdlijn met het werk per commit** 🟢
+*`GitService` kent alleen de working tree — `status`, `branch`, `HEAD` — en geen enkele commit. Er is
+dus geen enkele manier om te zien wat er over een dag gebeurd is. Het bouwsteentje ontbreekt maar de
+gegevens zijn er allemaal: `git log --numstat` levert per commit hash, tijd, auteur, onderwerp en de
+bestanden met hun aantallen, en de `event`-tabel heeft ts, path, session_id en subagent met een index
+op (workspace, ts). Nagemeten op de commit van 29-08 00:24 hier: het venster tussen de vorige commit
+en deze bevat 761 events, waarvan 318 van de agent, over 2 sessies — en van de 12 bestanden in de
+commit noemen er 6 zichzelf in de events, `frontend/src/components/feed.ts` vier keer en
+`diff-panel.ts` drie keer.*
+
+*Twee dingen die dit item moet respecteren. Ten eerste: dit is correlatie, geen oorzaak. Het venster
+tussen twee commits bevat het werk dat eraan voorafging, en dat is iets anders dan bewijzen dat die
+commit erdoor ontstond. De koppeling per bestandsnaam is wél exact en moet daarom de kern zijn — "dit
+bestand in deze commit is om 00:14 door sessie X bewerkt" — met het venster als context eromheen. Dat
+6 van de 12 bestanden geen eigen event hebben (gegenereerde `gql`-bestanden, het schema) hoort
+zichtbaar te zijn en niet weggepoetst: onvolledig en eerlijk is beter dan volledig en verzonnen.*
+
+*Ten tweede, gemeten en bijna misgelopen: git rapporteert tijden met een offset
+(`2026-08-29T00:24:35+02:00`) en de `event`-tabel bewaart UTC met een `Z`
+(`2026-08-28T22:26:53Z`). Die twee als string vergelijken in SQL geeft geen fout maar nul rijen — mijn
+eerste meting zei letterlijk "0 events" voor een venster waarin er 761 zaten. Alles wat git aanlevert
+moet naar UTC voor het de database in gaat.*
+
+*Vorm: markers op de bestaande tijdlijn, want die kan al een venster aanklikken om terug te spelen
+(P7-03), plus een lijst waarin je een commit kiest en ziet wat eraan voorafging.*
+
+**P11-02 Het dashboard vergeet alles zodra je commit** 🟢 — defect
+*Het scherpste deel van het probleem hierboven, en los van de tijdlijn al de moeite waard.
+`fileVersions` vergelijkt altijd `HEAD:<pad>` met de schijf, dus na een commit zijn beide kanten
+identiek en toont het diff-paneel een leeg scherm voor een bestand waar een uur werk in zit. Alles
+wat de dag opleverde is onzichtbaar op precies het moment dat het af is. Git heeft het gewoon nog:
+`git show HEAD:<pad>` en `git show HEAD~1:<pad>` zijn er allebei, en `git show --numstat` zegt wat er
+veranderde. Wat ontbreekt is een revisie-argument op `fileVersions` — nu impliciet altijd
+`HEAD..working` — zodat het paneel ook `HEAD~1..HEAD` kan tonen, oftewel de diff van een commit in
+plaats van alleen die van niet-vastgelegd werk. Let op de bestaande valkuil: `git show <rev>:<pad>`
+wordt vanaf de repository-root opgelost en een bestand in een submodule hoort bij een andere
+repository — `versions()` heeft daar al een regressietest voor die niet mag sneuvelen.*
+
+**P11-03 Welk deel van een commit kwam van de agent en welk deel met de hand** 🟢
+*Volgt direct uit P11-01 en is misschien het interessantste ervan. Een bestand dat door de agent
+bewerkt is draagt een `TOOL_USE` met `Edit`/`Write` en het pad; een bestand dat iemand zelf in de
+editor aanpaste verschijnt alleen als `FS`-event zonder actor. Per commit is dat dus te splitsen: "9
+van de 12 bestanden door de agent, 3 met de hand". Let op de grens van de bewering — het omgekeerde
+geldt niet: geen event betekent niet "met de hand", het kan ook betekenen dat het bestand
+gegenereerd is of dat de watcher toen niet draaide. Een derde categorie "onbekend" is hier geen
+zwakte maar precies wat invariant 2 vraagt.*
+
+**P11-04 Push als eigen gebeurtenis** 🟢
+*Een push is nu volstrekt onzichtbaar, terwijl het het moment is waarop werk de machine verlaat — het
+enige moment in de hele keten dat naar buiten treedt. `git rev-list --count @{u}..HEAD` geeft het
+aantal commits dat nog niet gepusht is (hier nu 0) en is goedkoop genoeg om mee te liften op de
+bestaande git-refresh. Daarmee kan een commit in de tijdlijn gemarkeerd worden als lokaal of gepusht,
+en wordt de overgang zelf een event. Een `pre-push`-hook zou het exacter maken maar valt onder
+invariant 1: dat is een hook die de agent kan ophouden, dus die moet dezelfde behandeling krijgen als
+`GuardService` of het moet bij pollen blijven.*
+
+**P11-05 Wat een commit gekost heeft** 🟢
+*Zodra P11-01 er is, is dit een venster verder. `UsageService.inLastSeconds` telt al tokens over een
+tijdvenster en `activity()` bucket ze; per commit is dat dezelfde som over het venster ertussen. Dat
+maakt de vraag "wat heeft deze wijziging gekost" voor het eerst beantwoordbaar. Met dezelfde
+voorbehouden als overal: het is wat die tokens bij API-tarieven zouden kosten en geen rekening, en
+het venster is correlatie — een commit die twee dagen na het werk gemaakt wordt sleept alles mee wat
+er ondertussen gebeurde. Een bovengrens per venster, of terugvallen op "onbekend" bij een gat, is
+eerlijker dan een getal dat te groot is.*
+
+**P11-06 Dagverslag** 🟡
+*"Wat heeft de agent vandaag gedaan" in één scherm: commits, sessies, tokens, de bestanden die het
+vaakst geraakt zijn. Aantrekkelijk en grotendeels een presentatielaag over P11-01 en P11-05. 🟡 omdat
+de verleiding groot is er een samenvatting in natuurlijke taal van te maken, en dit project heeft
+geen model in de lus — een verzonnen samenvatting is precies de fout waartegen de rest gebouwd is.
+Tellen en groeperen kan wel, en is waarschijnlijk genoeg.*
+
+---
+
 ## Epic 9 — Added: what the original list did not cover
 
 **P9-01 Event persistence (SQLite)** ✅
