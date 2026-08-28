@@ -33,7 +33,12 @@ Note Spring Boot 4 ships **Jackson 3**: the package is `tools.jackson.databind`,
 
 These are the decisions the project exists to hold. Do not quietly relax them.
 
-1. **The observer never blocks or alters the agent.** The hook script always exits 0 and swallows
+1. **The observer never blocks or alters the agent**, with exactly one exception: `GuardService`,
+   which is off by default, needs its own hook installed, and fails open. Anything else that could
+   make a crashed dashboard hang an agent needs the same treatment.
+1b. **"Off" must mean the hook cannot block**, not merely that the wording changes. `check()`
+   downgrades a DENY to WARN while observing. This was a real bug found end to end after unit tests
+   passed — they asserted on the event text and not on what was handed back to the hook. The hook script always exits 0 and swallows
    errors. Anything that could make a crashed dashboard hang an agent needs an explicit opt-in and a
    fail-open timeout.
 2. **Never invent attribution.** `FS` events carry no PID because macOS cannot supply one — FSEvents

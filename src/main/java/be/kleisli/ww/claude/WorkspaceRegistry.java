@@ -66,6 +66,33 @@ public class WorkspaceRegistry {
     adoptIfIdle(entries);
   }
 
+  /**
+   * Removes a registration.
+   *
+   * <p>Registration happens by itself, so unregistering has to be possible too: a hook fired once
+   * from the wrong directory, or a project since deleted, would otherwise sit in the list forever.
+   * Only the spool directory is removed; the project itself is never touched.
+   *
+   * @return true when something was actually removed
+   */
+  public synchronized boolean forget(String workspacePath) {
+    Path spool = spoolFor(Path.of(workspacePath));
+    if (!Files.isDirectory(spool)) {
+      return false;
+    }
+    try (Stream<Path> files = Files.walk(spool)) {
+      // Deepest first, so directories are empty by the time they are removed.
+      for (Path path : files.sorted(Comparator.reverseOrder()).toList()) {
+        Files.deleteIfExists(path);
+      }
+    } catch (IOException e) {
+      log.warn("cannot forget {}: {}", workspacePath, e.toString());
+      return false;
+    }
+    scan();
+    return true;
+  }
+
   /** Directory name for a workspace: every non-alphanumeric character becomes a dash. */
   public Path spoolFor(Path workspace) {
     return props.spoolBasePath().resolve(workspace.toString().replaceAll("[^a-zA-Z0-9]", "-"));

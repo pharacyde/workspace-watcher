@@ -33,6 +33,8 @@ public record WatchEvent(
     HOOK,
     /** Raw filesystem change. No actor is known — do not guess one. */
     FS,
+    /** A guard rule matched something an agent was about to do. */
+    GUARD,
     /** The watcher talking about itself. */
     SYSTEM
   }

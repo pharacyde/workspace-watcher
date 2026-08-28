@@ -21,6 +21,55 @@ type WatchEvent {
   detail: String
 }
 
+"""
+What a guard rule does when it matches.
+
+ALLOW is the absence of a decision, WARN records the match and lets the call through, and DENY
+blocks it - but only while the guard is enforcing. With the guard observing, a DENY rule still
+produces an event, so you can see what would have been stopped before letting it stop anything.
+"""
+enum GuardAction {
+  ALLOW
+  WARN
+  DENY
+}
+
+enum GuardRuleKind {
+  "Glob matched against a file path the tool is about to touch."
+  PATH
+  "Regular expression matched against a shell command."
+  COMMAND
+}
+
+type GuardRule {
+  kind: GuardRuleKind!
+  pattern: String!
+  action: GuardAction!
+  reason: String
+}
+
+type GuardConfig {
+  "False means observe only: rules still produce events but nothing is ever blocked."
+  enabled: Boolean!
+  "Block any file outside the watched workspace."
+  denyOutsideWorkspace: Boolean!
+  rules: [GuardRule!]!
+}
+
+type GuardDecision {
+  action: GuardAction!
+  reason: String
+  "The rule that matched, for the audit trail."
+  rule: String
+}
+
+input GuardRuleInput {
+  kind: GuardRuleKind!
+  pattern: String!
+  action: GuardAction!
+  reason: String
+}
+
 enum Source {
   "Parsed from an agent's own session transcript. Attribution is exact."
   TRANSCRIPT
@@ -28,6 +77,8 @@ enum Source {
   HOOK
   "Raw filesystem change. No actor is known - do not guess one."
   FS
+  "A guard rule matched something an agent was about to do."
+  GUARD
   "The watcher talking about itself."
   SYSTEM
 }
@@ -133,6 +184,9 @@ type Query {
   "Agent sessions in the watched workspace, most recently active first."
   sessions: [SessionEntry!]!
 
+  "Guard rules, and whether they are being enforced or only observed."
+  guard: GuardConfig!
+
   """
   Recorded history, oldest first. Unlike the live feed this outlives a restart: the in-memory
   buffer holds minutes, this holds weeks.
@@ -156,6 +210,30 @@ type Mutation {
   works - registration is a convenience, not a requirement.
   """
   watchWorkspace(path: String!): Boolean!
+
+  """
+  Removes a workspace registration. Only the spool directory is deleted; the project is untouched.
+
+  Registration happens by itself when an agent works somewhere, so a hook fired once from the wrong
+  directory, or a project since deleted, would otherwise stay in the list forever.
+  """
+  forgetWorkspace(path: String!): Boolean!
+
+  "Replaces the guard configuration and persists it."
+  setGuard(
+    enabled: Boolean!
+    denyOutsideWorkspace: Boolean!
+    rules: [GuardRuleInput!]!
+  ): GuardConfig!
+
+  """
+  Decides one tool call, for a PreToolUse hook to act on. Records the decision either way.
+
+  Fails open by design: a hook blocks the agent until it answers, so a watcher that is slow or gone
+  must let the call through rather than wedge the agent with it. This is a guardrail against an
+  agent's mistakes, not a boundary against a determined one.
+  """
+  checkToolUse(payloadBase64: String!): GuardDecision!
 
   """
   Records an agent hook payload. The payload is the agent's raw hook JSON, base64-encoded:

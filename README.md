@@ -171,6 +171,41 @@ timeout to every subsequent tool call.
 Either way the script always exits 0 and discards all output. A hook blocks the agent until it
 returns, and an observer must never be able to block or alter the agent it is watching.
 
+## Guard (optional)
+
+Rules about what an agent may touch. This is the one place the project stops being a passive
+observer, so it is off by default and takes two deliberate steps to enable — and even then, it
+**fails open**.
+
+Wire the guard script into `PreToolUse`, separately from the observing hook:
+
+```jsonc
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "*", "hooks": [
+          { "type": "command",
+            "command": "/absolute/path/to/workspace-watcher/hooks/workspace-watcher-guard.sh" } ] }
+    ]
+  }
+}
+```
+
+With the guard installed but not enforcing, a matching rule produces an event and nothing else: the
+feed shows `would block Write /Users/you/.ssh/id_rsa — ssh keys` while the call goes through. You
+get to see what the rules catch before letting them catch anything. Turn enforcement on with the
+`setGuard` mutation, and the same match becomes `blocked` and the tool call never runs.
+
+Out of the box it warns on `.env` files and `.git/config`, denies `.ssh`, `.pem`, `id_rsa` and
+`~/.aws/credentials`, and denies `rm -rf /`. `denyOutsideWorkspace` additionally blocks any file
+outside the project.
+
+**It is a guardrail, not a security boundary.** A hook holds the agent until it answers, so a
+watcher that is slow, wedged or not running has to let the call through rather than wedge the agent
+with it — measured at 30ms to allow when nothing is listening. Anyone who can stop the watcher can
+bypass the guard. That is the right trade against an agent's mistakes, and the wrong one against an
+adversary.
+
 ## Configuration
 
 Any property can be passed as `--watcher.foo=bar` or set in `application.yml`.

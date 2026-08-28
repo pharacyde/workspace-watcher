@@ -8,7 +8,7 @@ import { panelStyles } from '../styles';
 type Event = EventsSubscription['events'];
 
 const MAX_EVENTS = 20_000;
-const ALL_SOURCES: Source[] = ['TRANSCRIPT', 'HOOK', 'FS', 'SYSTEM'];
+const ALL_SOURCES: Source[] = ['TRANSCRIPT', 'HOOK', 'GUARD', 'FS', 'SYSTEM'];
 
 /** Short label per source, so the eye can tell attributed events from unattributed ones. */
 function label(source: Source, type: string): string {
@@ -17,6 +17,8 @@ function label(source: Source, type: string): string {
       return type === 'TOOL_USE' ? 'agent →' : 'agent ←';
     case 'HOOK':
       return 'hook';
+    case 'GUARD':
+      return type === 'DENIED' ? 'blocked' : 'flagged';
     case 'FS':
       return type.toLowerCase();
     default:
@@ -60,6 +62,13 @@ export class Feed extends LitElement {
       }
       .tag.HOOK {
         color: var(--hook);
+      }
+      .tag.GUARD {
+        color: var(--del);
+      }
+      /* A blocked call is the loudest thing this dashboard has to say. */
+      .GUARD .msg {
+        color: var(--warn);
       }
       .error .msg {
         color: var(--del);
@@ -200,7 +209,7 @@ export class Feed extends LitElement {
                 .items=${visible}
                 .renderItem=${(event: Event) => html`
                   <div
-                    class="rowline ${event.type === 'TOOL_ERROR' ? 'error' : ''}"
+                    class="rowline ${event.type === 'TOOL_ERROR' ? 'error' : ''} ${event.source}"
                     style=${event.path ? 'cursor:pointer' : ''}
                     @click=${() =>
                       event.path &&

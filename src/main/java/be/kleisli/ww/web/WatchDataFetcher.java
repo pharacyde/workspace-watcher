@@ -10,11 +10,14 @@ import be.kleisli.ww.core.WatchEvent;
 import be.kleisli.ww.core.WatcherProperties;
 import be.kleisli.ww.generated.types.FileVersions;
 import be.kleisli.ww.generated.types.GitSnapshot;
+import be.kleisli.ww.generated.types.GuardConfig;
+import be.kleisli.ww.generated.types.GuardDecision;
 import be.kleisli.ww.generated.types.ProcessSnapshot;
 import be.kleisli.ww.generated.types.SessionEntry;
 import be.kleisli.ww.generated.types.Status;
 import be.kleisli.ww.generated.types.WorkspaceEntry;
 import be.kleisli.ww.git.GitService;
+import be.kleisli.ww.guard.GuardService;
 import be.kleisli.ww.proc.ProcessTreeService;
 import be.kleisli.ww.store.EventStore;
 import com.netflix.graphql.dgs.DgsComponent;
@@ -27,6 +30,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import org.reactivestreams.Publisher;
 import tools.jackson.databind.ObjectMapper;
 
@@ -47,6 +51,7 @@ public class WatchDataFetcher {
   private final WorkspaceRegistry registry;
   private final SessionRegistry sessions;
   private final EventStore store;
+  private final GuardService guard;
   private final EventBus eventBus;
   private final GitService git;
   private final ProcessTreeService processes;
@@ -60,6 +65,7 @@ public class WatchDataFetcher {
       WorkspaceRegistry registry,
       SessionRegistry sessions,
       EventStore store,
+      GuardService guard,
       EventBus eventBus,
       GitService git,
       ProcessTreeService processes,
@@ -71,6 +77,7 @@ public class WatchDataFetcher {
     this.registry = registry;
     this.sessions = sessions;
     this.store = store;
+    this.guard = guard;
     this.eventBus = eventBus;
     this.git = git;
     this.processes = processes;
@@ -121,6 +128,12 @@ public class WatchDataFetcher {
   @DgsQuery
   public List<SessionEntry> sessions() {
     return mapper.toSessions(sessions.current());
+  }
+
+  /** Guard rules, and whether they are enforced or only observed. */
+  @DgsQuery
+  public GuardConfig guard() {
+    return mapper.toGuardConfig(guard.config());
   }
 
   /** Recorded history, which outlives a restart. */
@@ -181,6 +194,51 @@ public class WatchDataFetcher {
   public boolean watchWorkspace(@InputArgument String path) {
     active.set(Path.of(path));
     return true;
+  }
+
+  /** Removes a workspace registration. The project itself is never touched. */
+  @DgsMutation
+  public boolean forgetWorkspace(@InputArgument String path) {
+    return registry.forget(path);
+  }
+
+  @DgsMutation
+  public GuardConfig setGuard(
+      @InputArgument Boolean enabled,
+      @InputArgument Boolean denyOutsideWorkspace,
+      @InputArgument List<Map<String, Object>> rules) {
+    List<GuardService.Rule> parsed =
+        rules.stream()
+            .map(
+                rule ->
+                    new GuardService.Rule(
+                        GuardService.Kind.valueOf((String) rule.get("kind")),
+                        (String) rule.get("pattern"),
+                        GuardService.Action.valueOf((String) rule.get("action")),
+                        (String) rule.get("reason")))
+            .toList();
+    return mapper.toGuardConfig(
+        guard.save(
+            new GuardService.Config(
+                Boolean.TRUE.equals(enabled), Boolean.TRUE.equals(denyOutsideWorkspace), parsed)));
+  }
+
+  /**
+   * Decides one tool call for a PreToolUse hook.
+   *
+   * <p>Fails open everywhere it can: unreadable input is allowed rather than blocked, because a
+   * hook holds the agent until this answers.
+   */
+  @DgsMutation
+  public GuardDecision checkToolUse(@InputArgument String payloadBase64) {
+    try {
+      String decoded =
+          new String(Base64.getDecoder().decode(payloadBase64), StandardCharsets.UTF_8);
+      return mapper.toGuardDecision(guard.check(decoded));
+    } catch (RuntimeException e) {
+      return mapper.toGuardDecision(
+          new GuardService.Decision(GuardService.Action.ALLOW, null, null));
+    }
   }
 
   /**

@@ -5,12 +5,18 @@ import be.kleisli.ww.claude.WorkspaceRegistry;
 import be.kleisli.ww.generated.types.FileStatus;
 import be.kleisli.ww.generated.types.FileVersions;
 import be.kleisli.ww.generated.types.GitSnapshot;
+import be.kleisli.ww.generated.types.GuardAction;
+import be.kleisli.ww.generated.types.GuardConfig;
+import be.kleisli.ww.generated.types.GuardDecision;
+import be.kleisli.ww.generated.types.GuardRule;
+import be.kleisli.ww.generated.types.GuardRuleKind;
 import be.kleisli.ww.generated.types.ProcessNode;
 import be.kleisli.ww.generated.types.ProcessSnapshot;
 import be.kleisli.ww.generated.types.SessionEntry;
 import be.kleisli.ww.generated.types.Source;
 import be.kleisli.ww.generated.types.WorkspaceEntry;
 import be.kleisli.ww.git.GitService;
+import be.kleisli.ww.guard.GuardService;
 import be.kleisli.ww.proc.ProcessTreeService;
 import be.kleisli.ww.store.EventStore;
 import java.util.List;
@@ -103,6 +109,32 @@ public class ApiMapper {
         .agent(stored.agent())
         .sessionId(stored.sessionId())
         .detail(stored.detail())
+        .build();
+  }
+
+  public GuardConfig toGuardConfig(GuardService.Config config) {
+    return GuardConfig.newBuilder()
+        .enabled(config.enabled())
+        .denyOutsideWorkspace(config.denyOutsideWorkspace())
+        .rules(
+            config.rules().stream()
+                .map(
+                    rule ->
+                        GuardRule.newBuilder()
+                            .kind(GuardRuleKind.valueOf(rule.kind().name()))
+                            .pattern(rule.pattern())
+                            .action(GuardAction.valueOf(rule.action().name()))
+                            .reason(rule.reason())
+                            .build())
+                .toList())
+        .build();
+  }
+
+  public GuardDecision toGuardDecision(GuardService.Decision decision) {
+    return GuardDecision.newBuilder()
+        .action(GuardAction.valueOf(decision.action().name()))
+        .reason(decision.reason())
+        .rule(decision.rule())
         .build();
   }
 

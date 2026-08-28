@@ -79,11 +79,18 @@ A red button that sends `SIGTERM`/`SIGKILL` to a PID or process tree.
 makes the tool safe to point at anything. Ship it opt-in and off by default, behind a token, and
 never expose the port. Design the config so the read-only build stays a supported mode.*
 
-**P4-02 Filesystem watchdog & protected paths** 🟢 — highest-value item in the list
+**P4-02 Filesystem watchdog & protected paths** ✅
 Warn when an agent touches files outside the project, or sensitive files like `.env` or
 `.git/config`.
-*Note: as a warning this arrives after the fact. For Claude Code the same rule can run as a
-`PreToolUse` hook, which can actually **block** the write. Same rule set, real enforcement.*
+*Done as a `PreToolUse` hook, so it blocks rather than warns after the fact. Two deliberate steps to
+enable — install the guard script, then switch enforcement on — and in between, rules produce events
+without stopping anything, so you see what they catch first. Fails open everywhere: a hook holds the
+agent until it answers, which makes this a guardrail against mistakes rather than a boundary
+against an adversary, and the README says so.*
+
+**P4-01 Emergency kill switch** 🟡 unchanged
+*Still deliberately not built. P4-02 shows the shape a control feature has to take here: off by
+default, a separate opt-in, and failing open.*
 
 **P4-03 Multi-workspace support** ✅
 Switch between project folders from a dropdown.
