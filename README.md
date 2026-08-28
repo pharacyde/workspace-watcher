@@ -91,7 +91,7 @@ the process list. In the process tree a match anywhere in a subtree keeps that s
 never orphaned from its parent.
 
 Clicking a row opens the event in the fourth panel: the full tool output, not the one-line headline.
-That output has a `wrap` toggle, off by default — build output and stack traces are column-aligned,
+Both the feed and that output have a `wrap` toggle, off by default — build output and stack traces are column-aligned,
 and wrapping them destroys the alignment that makes them readable. Clicking a file in the working
 tree shows its diff there instead; the last click wins, so you always know what you are looking at.
 

@@ -33,6 +33,7 @@ export class Feed extends LitElement {
     session: { state: true },
     replay: { attribute: false },
     follow: { state: true },
+    wrap: { state: true },
     search: { attribute: false },
     workspace: { attribute: false },
     replayed: { state: true },
@@ -41,6 +42,8 @@ export class Feed extends LitElement {
   declare private hidden_: Set<Source>;
   /** Auto-scroll to the newest row, like tail -f. */
   declare private follow: boolean;
+  /** Let a long command spill onto several lines instead of being cut off. */
+  declare private wrap: boolean;
   /** Shared across every panel; empty means no filtering. */
   declare search: string;
   /** Empty means every agent in this workspace. */
@@ -94,6 +97,17 @@ export class Feed extends LitElement {
       .msg {
         flex: 1;
         min-width: 0;
+      }
+      /* Wrapped rows are taller, and the virtualizer measures them, so the timestamp and tag are
+         pinned to the top rather than floating to the middle of a three-line command. */
+      .rowline.wrapped {
+        align-items: flex-start;
+      }
+      .rowline.wrapped .msg {
+        white-space: pre-wrap;
+        word-break: break-word;
+        overflow: visible;
+        text-overflow: clip;
       }
       .agent {
         color: var(--dim);
@@ -160,6 +174,7 @@ export class Feed extends LitElement {
     super();
     this.hidden_ = new Set();
     this.follow = true;
+    this.wrap = false;
     this.search = '';
     this.session = '';
     this.replay = null;
@@ -312,6 +327,13 @@ export class Feed extends LitElement {
           ${this.follow ? '⤓ follow' : '⤓ follow off'}
         </button>
         <button
+          class=${this.wrap ? 'on' : ''}
+          title="Let a long command spill onto several lines instead of being cut off"
+          @click=${() => (this.wrap = !this.wrap)}
+        >
+          ${this.wrap ? '⏎ wrap on' : '⏎ wrap off'}
+        </button>
+        <button
           class=${this.log.paused ? 'paused' : ''}
           title="Hold new events. Nothing is lost - they arrive when you resume."
           @click=${() => this.log.setPaused(!this.log.paused)}
@@ -352,7 +374,7 @@ export class Feed extends LitElement {
                     ? html``
                     : html`
                   <div
-                    class="rowline ${event.type === 'TOOL_ERROR' ? 'error' : ''} ${event.source}"
+                    class="rowline ${event.type === 'TOOL_ERROR' ? 'error' : ''} ${event.source} ${this.wrap ? 'wrapped' : ''}"
                     style="cursor:pointer"
                     @click=${() =>
                       this.dispatchEvent(
@@ -367,7 +389,7 @@ export class Feed extends LitElement {
                       >${new Date(event.ts).toLocaleTimeString('en-GB', { hour12: false })}</span
                     >
                     <span class="tag ${event.source}">${label(event.source, event.type)}</span>
-                    <span class="msg ellipsis">
+                    <span class="msg ${this.wrap ? '' : 'ellipsis'}">
                       ${event.agent ? html`<span class="agent">${event.agent} </span>` : ''}${event.summary}
                     </span>
                         </div>
