@@ -134,6 +134,43 @@ class TranscriptTailServiceTest {
   }
 
   @Test
+  @DisplayName("names the MCP server a call went to")
+  void labelsMcpCalls() throws IOException {
+    // Without this a call to Jenkins reads exactly like editing a file two lines above it.
+    poll();
+    append(toolUse("mcp__jenkins__jenkins_get_build_status", "{\"job\":\"omv-master\"}"));
+
+    WatchEvent event = poll().getFirst();
+    assertThat(event.mcpServer()).isEqualTo("jenkins");
+    // The server is its own field, so the summary carries only the tool - mcp__a__b is mostly
+    // punctuation.
+    assertThat(event.summary()).isEqualTo("jenkins_get_build_status");
+  }
+
+  @Test
+  @DisplayName("names the kind of subagent a call launched")
+  void labelsSubagentLaunches() throws IOException {
+    poll();
+    append(
+        toolUse("Task", "{\"description\":\"Find the flaky test\",\"subagent_type\":\"Explore\"}"));
+
+    WatchEvent event = poll().getFirst();
+    assertThat(event.subagent()).isEqualTo("Explore");
+    assertThat(event.summary()).contains("Find the flaky test");
+  }
+
+  @Test
+  @DisplayName("an ordinary tool call carries neither label")
+  void leavesOrdinaryCallsUnlabelled() throws IOException {
+    poll();
+    append(toolUse("Bash", "{\"command\":\"mvn verify\"}"));
+
+    WatchEvent event = poll().getFirst();
+    assertThat(event.mcpServer()).isNull();
+    assertThat(event.subagent()).isNull();
+  }
+
+  @Test
   @DisplayName("resyncs rather than reading garbage when a transcript is truncated")
   void resyncsOnTruncation() throws IOException {
     poll();

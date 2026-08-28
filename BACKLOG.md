@@ -219,7 +219,7 @@ lane, and MCP servers as their own actors, is nearly free and is exactly the "bl
 exists to open.
 
 **P9-07 Tests and CI** ✅
-*27 tests covering the parsers and the bug classes this project actually hit: the git path
+*91 tests covering the parsers and the bug classes this project actually hit: the git path
 resolution that broke when the workspace is a subdirectory, transcript tailing across partial lines
 and multi-byte characters and truncation, `lsof` output including a sibling directory that merely
 shares a prefix, hook payloads that are malformed or enormous, and an event stream that replays
