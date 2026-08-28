@@ -54,7 +54,7 @@ and root. See P9-04.*
 *`GitService` + `/api/diff` serve the diff today, rendered as a coloured unified diff with no
 external dependency. Monaco side-by-side is a straight upgrade whenever a build step is acceptable.*
 
-**P2-03 Auto-git snapshot / time-travel undo** 🟡
+**P2-03 Auto-git snapshot / time-travel undo** 🟡 — zie P10-09, dat het schaduw-repo overbodig maakt
 Micro-snapshots before a large agent action, so it can be rolled back in one click.
 *Note: an observer writing into the user's own repository is a bad trade. Use a shadow repository
 (`GIT_DIR` pointing outside the workspace) so snapshots can never touch the user's index, stash or
@@ -163,6 +163,133 @@ opt-in as P4-01.*
 **P4-03b Workspace switching completeness** ✅
 *Every panel follows a switch — git, processes, sessions, the feed, the open file — and the choice
 is remembered across restarts, on the server rather than in the browser.*
+
+## Epic 10 — Wat er nog niet gelezen wordt
+
+Uit een onderzoek naar wat Claude Code zelf op deze machine wegschrijft. Elk item wijst naar data
+die al bestaat: laag 1, exact, lokaal, zonder rechten, zonder de agent aan te raken. Metingen
+hieronder zijn nagemeten op deze machine, niet overgenomen.
+
+**P10-10 Tokens werden dubbel geteld** ✅
+*Claude Code schrijft één transcriptrecord per content-blok — thinking, text, tool_use — en herhaalt
+op elk daarvan het identieke, volledige usage-blok. Optellen vermenigvuldigde de tokens van een
+bericht met het aantal blokken dat het toevallig had: 1063 records tegen 458 berichten, 58% te hoog.
+Het dashboard toonde 528M tokens en $327 waar 224M en $140 juist is, en het cache-aandeel van de
+kosten is 79% in plaats van de 71% die de README noemde. Precies de faalmodus waar dit project tegen
+gebouwd is, en hij overleefde omdat hij zich niet aankondigt: de verhoudingen tussen tokensoorten
+blijven kloppen, elk cijfer blijft plausibel, alleen de orde van grootte is fout. Gededupliceerd op
+`message.id`.*
+
+**P10-02 Subagent-transcripts worden niet gelezen** 🟢
+*`TranscriptLocator` zoekt `~/.claude/projects/*/*.jsonl` en mist daarmee een hele directorylaag:
+subagents schrijven naar `<sessionId>/subagents/agent-<agentId>.jsonl`. Nagemeten op deze machine:
+1111 bestanden, samen 764 MB, grootste 24 MB — waarvan de huidige glob er nul vindt. Het gevolg is
+dat P9-06 half werk is: de start van een subagent is zichtbaar als chip, en alles wat die subagent
+daarna doet valt buiten de feed. Voor wie subagents gebruikt is dat de grootste blinde vlek van de
+tool. Dit weerlegt ook mijn eigen eerdere conclusie dat `isSidechain` nooit gezet wordt — ik keek in
+de verkeerde bestanden. De koppeling is exact: `toolUseResult.agentId` van de `Agent`-call wijst het
+bestand aan, en `agent-<agentId>.meta.json` draagt `toolUseId`, `agentType` en `spawnDepth`. Een
+subagent-record draagt de `sessionId` van de ouder, dus het sessiefilter werkt meteen — een subagent
+hoort als eigen laan onder zijn sessie, niet als losse sessie.*
+
+**P10-01 Resterend limietverbruik uit `~/.claude.json`** 🟢
+*De header zegt wat er is uitgegeven en zwijgt over wat er nog over is, omdat CLAUDE.md vaststelt dat
+dat lokaal niet kenbaar is. Dat klopt niet: `cachedUsageUtilization` bevat `utilization.five_hour` en
+`.seven_day` met een percentage en een exact `resets_at`, plus een `limits[]`-array en de
+`extra_usage`-credittoestand. Nagemeten: 7% van het 5-uursvenster, 49% van het 7-daagse, met
+resetmomenten. `Billing` opent dit bestand al en leest er nu alleen `"oauthAccount"` uit als string.
+Twee eerlijkheidseisen: toon `fetchedAtMs`, zodat een oud cijfer zichzelf als oud aankondigt, en toon
+percentages — `limit_dollars` is `null` op een abonnement. De regel in CLAUDE.md moet herschreven
+worden, niet stilzwijgend overtreden. Het principe blijft heel: er wordt niets geraden en de
+accountcredential blijft onaangeroerd; er wordt een bestand gelezen dat er toch al is.*
+
+**P10-11 Attributie gaat verloren bij opslag** 🟢 — defect
+*De tabel `event` heeft geen kolommen voor `mcp_server` en `subagent`, dus `ApiMapper.toEvent(Stored)`
+levert ze altijd null: de chips staan in de live feed en zijn weg zodra je een tijdlijnschijf
+aanklikt en uit de database leest. Bovendien wordt de MCP-server uit de naam `mcp__server__tool`
+gepeuterd terwijl Claude Code hem meelevert: assistant-records dragen `attributionMcpServer`,
+`attributionMcpTool`, `attributionSkill`, `attributionPlugin` en `attributionAgent`. Die laatste drie
+openen een dimensie die er nog niet is — welke skill of plugin een beurt aanstuurde.*
+
+**P10-03 Duur per tool-call en per beurt** 🟢
+*De feed zegt wát er draaide en niet wat het kostte, terwijl dat in grote Maven-projecten de vraag is
+waar het uur heen ging. `TranscriptTailService` koppelt `tool_use.id` al aan `tool_result.tool_use_id`
+in `pendingCalls` en gooit de tijdstempels weg. Daarnaast schrijft Claude Code
+`system`/`subtype: turn_duration` met `durationMs`, en zeldzamer `cost-state` met
+`totalToolDuration`, `totalLinesAdded` en `totalLinesRemoved` — die laatste zijn meteen een
+onafhankelijke controle op P10-10.*
+
+**P10-04 Limietblokkades en API-fouten** 🟢
+*Als een agent midden in het werk stilvalt, weet het dashboard dat niet. Claude Code schrijft er een
+synthetisch record voor weg met een gestructureerd veld ernaast — `quotaLimits` met `status`,
+`resetsAt` en `rateLimitType` — plus `error` en `apiErrorStatus` (429, 529). Gestructureerd is hier
+het punt: de Engelse zin ernaast is lokalisatiegevoelig en hoeft niet geparsed te worden. Iets anders
+dan P10-01: een terugkijkend feit met een tijdstempel, geen voorspelling. Ook als markering op de
+tijdlijn, want een gat door een limiet ziet er nu identiek uit als een gat waarin niet gewerkt werd.*
+
+**P10-06 Afgewezen en afgebroken tool-calls** 🟢
+*Het moment waarop jij ingrijpt is nergens zichtbaar, terwijl dat het interessantste moment in een
+sessie is. Het staat in het transcript en heeft geen hook nodig: `toolDenialKind` op user-records
+(`user-rejected`, `automode-blocked`, `permission-rule`), vaak met `userFeedback` waarin je in vrije
+tekst zei waarom, plus onderbrekingen herkenbaar aan `[Request interrupted by user]`. In een
+terugblik op een uur is "hier hield ik hem tegen en dit zei ik erbij" waardevoller dan de tien calls
+eromheen.*
+
+**P10-05 Contextvulling en compaction** 🟢
+*Een sessie verloor 909.061 tokens context in één keer en niets in het dashboard zei dat.
+`system`/`subtype: compact_boundary` draagt `compactMetadata` met `trigger`, `preTokens`,
+`postTokens` en `durationMs`. De vulling zelf is per beurt af te leiden uit velden die al geparsed
+worden. Een vijfde tijdreeks naast events, tokens, cpu en memory — en de enige die verklaart waarom
+een agent halverwege een uur plots dommer werd. Let op: een compact-grens verbreekt de
+`parentUuid`-keten; `logicalParentUuid` is de schakel eroverheen.*
+
+**P10-07 Sessies aan processen koppelen** 🟢
+*`WatchEvent.pid` bestaat in het record, in het schema en in `ApiMapper`, en wordt door geen enkele
+producer ooit gevuld. Claude Code schrijft de ontbrekende helft zelf weg in
+`~/.claude/sessions/<pid>.json`: `pid`, `sessionId`, `cwd`, `name` en `status`. Dat is laag 1 — een
+bestand dat de agent over zichzelf schrijft — en dus geen verzonnen attributie; de regel dat
+FS-events geen PID dragen blijft onaangetast. Het procespaneel en het sessiefilter zijn nu twee
+lijsten die naar dezelfde `claude` wijzen; hiermee vallen ze samen. Voorbehoud: in een steekproef
+stond `status` altijd op `busy`; de inactieve kant moet nagemeten worden.*
+
+**P10-09 Terugdraaien per bewerking** 🟢 — vervangt P2-03
+*P2-03 stond op 🟡 met het voorbehoud dat er een schaduw-repository nodig is om niet in de repo van de
+gebruiker te schrijven. Dat is niet meer nodig: Claude Code bewaart de bytes al in
+`~/.claude/file-history/<sessionId>/<hash>@vN`, met versienummers en `backupTime`. Aanvullend draagt
+`toolUseResult` van elke `Edit` en `Write` een `structuredPatch` — de exacte hunk van díe bewerking.
+Het diffpaneel toont alleen HEAD tegen werkkopie, dus vijf opeenvolgende bewerkingen van hetzelfde
+bestand zijn niet uit elkaar te halen. Volledig lezend; het schaduw-repo-voorbehoud kan geschrapt.*
+
+**P10-08 De opdracht in de feed** 🟢
+*De feed toont wat de agent deed en nooit wat hem gevraagd werd. `TranscriptTailService` negeert
+`text`-blokken als "narration, not actions" — juist voor het antwoord van de agent, verkeerd voor de
+instructie van de gebruiker, die de hoogste signaaldichtheid van het bestand heeft. Terugscrubben in
+een uur is nu een reeks tool-calls zonder de zin die ze veroorzaakte. Denkstappen blijven terecht
+buiten de feed; een opdracht is geen narratie.*
+
+**P10-12 statusLine als tweede bron** 🟡
+*De payload die Claude Code aan een `statusLine`-commando geeft is rijker dan wat er op schijf staat:
+`context_window.used_percentage` en `context_window_size` (de noemer die P10-05 mist), live
+`rate_limits` waar `cachedUsageUtilization` een cache is, en `cost.total_lines_added`. Het script kan
+in dezelfde spooldirectory laten vallen die er al is. 🟡 omdat het een tweede installatiestap is, en
+omdat de verhouding tot invariant 1 opgeschreven moet worden: een statusLine-commando ligt niet op
+het pad van een tool-call, wordt gedebouncet en wordt afgebroken — het ergste wat een traag script
+doet is de statusbalk verouderen, niet de agent ophouden. Dat is een wezenlijk andere afweging dan
+bij de guard en hoort naast invariant 1, niet eronder.*
+
+**P10-13 Bredere hook-dekking** 🟡
+*`HookEvents` zet `WatchEvent.type` letterlijk op `hook_event_name` en is dus al event-agnostisch;
+`notify.ts` behandelt zelfs al een `Stop`-event dat de README nergens laat installeren. Na P10-02,
+P10-04 en P10-06 blijven er twee over die iets toevoegen wat de transcripts niet geven:
+`Notification` (matchers `idle_prompt`, `agent_needs_input`) en `SubagentStop`. 🟡 omdat het niet bij
+installeren blijft: de events landen als kale strings zonder eigen weergave.*
+
+**P10-14 Live headroom zonder Claude Code's cache** 🔴
+*Het percentage van P10-01 komt uit een cache met een `fetchedAtMs`. Zelf de actuele stand ophalen kan
+niet: er is geen CLI-ingang (`claude --help` kent geen `usage`- of `limits`-subcommando), `/usage` is
+een slash-commando binnen een sessie dat de accountcredential gebruikt, en er is geen ander lokaal
+cachebestand. De verse waarde is alleen bereikbaar langs de statusLine van P10-12. Dit item bestaat
+om vast te leggen dat de directe route dood is, zodat hij niet nog eens onderzocht wordt.*
 
 ## Epic 9 — Added: what the original list did not cover
 
