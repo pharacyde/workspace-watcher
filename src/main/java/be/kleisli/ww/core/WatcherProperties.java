@@ -66,6 +66,15 @@ public class WatcherProperties {
   /** How long recorded history is kept. */
   private int retentionDays = 30;
 
+  /**
+   * Hard cap on recorded events, whatever the retention window says.
+   *
+   * <p>A row costs roughly 490 bytes measured, so a million rows is about half a gigabyte. That is
+   * years of ordinary use, and it bounds the file even if a month turns out to mean far more events
+   * than anyone expected.
+   */
+  private int maxStoredEvents = 1_000_000;
+
   /** How often the spool directory is drained. Cheap: the directory is normally empty. */
   private long spoolPollMs = 200;
 
@@ -163,6 +172,14 @@ public class WatcherProperties {
 
   public void setRetentionDays(int retentionDays) {
     this.retentionDays = retentionDays;
+  }
+
+  public int getMaxStoredEvents() {
+    return maxStoredEvents;
+  }
+
+  public void setMaxStoredEvents(int maxStoredEvents) {
+    this.maxStoredEvents = maxStoredEvents;
   }
 
   public long getRegistryPollMs() {

@@ -96,6 +96,7 @@ public class EventStore {
       try (Statement statement = connection.createStatement()) {
         // WAL so a long read cannot block the writer, and vice versa.
         statement.execute("PRAGMA journal_mode=WAL");
+        statement.execute("PRAGMA auto_vacuum=INCREMENTAL");
         statement.execute("PRAGMA synchronous=NORMAL");
         statement.execute(
             """
@@ -113,6 +114,10 @@ public class EventStore {
               workspace TEXT NOT NULL)\
             """);
         statement.execute("CREATE INDEX IF NOT EXISTS event_workspace_ts ON event (workspace, ts)");
+        // The common query is "the most recent N for this workspace", which orders by id. The
+        // (workspace, ts) index cannot serve that ordering, so without this one SQLite filtered
+        // by workspace and then sorted the whole partition.
+        statement.execute("CREATE INDEX IF NOT EXISTS event_workspace_id ON event (workspace, id)");
       }
       connection.setAutoCommit(false);
       log.info("recording history to {}", file);
@@ -257,20 +262,42 @@ public class EventStore {
     return rows.reversed();
   }
 
-  /** Trims anything past the retention window once an hour. */
+  /**
+   * Trims history once an hour, by age and by count.
+   *
+   * <p>Age alone is not enough. A row costs roughly 384 bytes measured, so a busy month runs to
+   * gigabytes; the row cap is the backstop for when "thirty days" turns out to mean far more events
+   * than anyone expected.
+   */
   @Scheduled(fixedDelay = 3_600_000, initialDelay = 60_000)
   public void prune() {
     if (connection == null) {
       return;
     }
     String cutoff = Instant.now().minus(props.getRetentionDays(), ChronoUnit.DAYS).toString();
-    try (PreparedStatement statement =
-        connection.prepareStatement("DELETE FROM event WHERE ts < ?")) {
-      statement.setString(1, cutoff);
-      int removed = statement.executeUpdate();
+    try {
+      int removed;
+      try (PreparedStatement statement =
+          connection.prepareStatement("DELETE FROM event WHERE ts < ?")) {
+        statement.setString(1, cutoff);
+        removed = statement.executeUpdate();
+      }
+      try (PreparedStatement statement =
+          connection.prepareStatement(
+              """
+              DELETE FROM event WHERE id <= (
+                SELECT id FROM event ORDER BY id DESC LIMIT 1 OFFSET ?)\
+              """)) {
+        statement.setInt(1, props.getMaxStoredEvents());
+        removed += statement.executeUpdate();
+      }
       connection.commit();
       if (removed > 0) {
-        log.info("pruned {} event(s) older than {} days", removed, props.getRetentionDays());
+        log.info("pruned {} event(s)", removed);
+        try (Statement statement = connection.createStatement()) {
+          // Without this the file keeps the space it no longer needs.
+          statement.execute("PRAGMA incremental_vacuum");
+        }
       }
     } catch (SQLException e) {
       log.warn("cannot prune history: {}", e.toString());

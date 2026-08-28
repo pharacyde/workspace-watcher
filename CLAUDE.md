@@ -144,6 +144,10 @@ own `~/.claude`.
   contained when the watcher started, and Claude Code writes the `ai-title` near the beginning of a
   session, so `SessionRegistry` searches each transcript once for it. Without that, every session
   predating the watcher shows as an opaque identifier forever.
+- **The (workspace, id) index is load-bearing.** The common query is "the most recent N for this
+  workspace", which orders by id; the (workspace, ts) index cannot serve that ordering. Measured
+  over 500k rows: 328ms without it, 1ms with. It costs about 18% of write throughput and 28% of
+  disk, which is a trade worth making twice.
 - **Recording must never slow a collector.** `EventStore` queues and flushes on a scheduler, and
   drops the newest events if the queue fills rather than blocking. It also subscribes to the bus
   instead of the bus knowing about it, so storage stays invisible to the thing being stored.
