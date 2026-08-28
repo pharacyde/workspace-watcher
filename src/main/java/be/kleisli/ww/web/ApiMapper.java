@@ -1,11 +1,13 @@
 package be.kleisli.ww.web;
 
+import be.kleisli.ww.claude.SessionRegistry;
 import be.kleisli.ww.claude.WorkspaceRegistry;
 import be.kleisli.ww.generated.types.FileStatus;
 import be.kleisli.ww.generated.types.FileVersions;
 import be.kleisli.ww.generated.types.GitSnapshot;
 import be.kleisli.ww.generated.types.ProcessNode;
 import be.kleisli.ww.generated.types.ProcessSnapshot;
+import be.kleisli.ww.generated.types.SessionEntry;
 import be.kleisli.ww.generated.types.Source;
 import be.kleisli.ww.generated.types.WorkspaceEntry;
 import be.kleisli.ww.git.GitService;
@@ -79,6 +81,19 @@ public class ApiMapper {
                     .lastActivity(entry.lastActivity())
                     .pendingEvents(entry.pendingEvents())
                     .exists(entry.exists())
+                    .build())
+        .toList();
+  }
+
+  public List<SessionEntry> toSessions(List<SessionRegistry.Entry> entries) {
+    return entries.stream()
+        .map(
+            entry ->
+                SessionEntry.newBuilder()
+                    .id(entry.id())
+                    .title(entry.title())
+                    .lastActivity(entry.lastActivity())
+                    .live(entry.live())
                     .build())
         .toList();
   }

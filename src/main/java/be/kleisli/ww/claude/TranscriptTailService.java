@@ -4,18 +4,14 @@ import be.kleisli.ww.core.ActiveWorkspace;
 import be.kleisli.ww.core.EventBus;
 import be.kleisli.ww.core.Text;
 import be.kleisli.ww.core.WatchEvent;
-import be.kleisli.ww.core.WatcherProperties;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -40,8 +36,9 @@ public class TranscriptTailService {
   private static final Logger log = LoggerFactory.getLogger(TranscriptTailService.class);
   private static final int SUMMARY_LIMIT = 240;
 
-  private final WatcherProperties props;
   private final ActiveWorkspace active;
+  private final TranscriptLocator locator;
+  private final SessionRegistry sessions;
   private final EventBus bus;
   private final ObjectMapper mapper;
 
@@ -58,51 +55,22 @@ public class TranscriptTailService {
       };
 
   public TranscriptTailService(
-      WatcherProperties props, ActiveWorkspace active, EventBus bus, ObjectMapper mapper) {
-    this.props = props;
+      ActiveWorkspace active,
+      TranscriptLocator locator,
+      SessionRegistry sessions,
+      EventBus bus,
+      ObjectMapper mapper) {
     this.active = active;
+    this.locator = locator;
+    this.sessions = sessions;
     this.bus = bus;
     this.mapper = mapper;
   }
 
-  /**
-   * Claude Code derives the transcript directory name from the working directory by replacing every
-   * character that is not a letter or digit with a dash.
-   */
-  static String escapeCwd(Path path) {
-    return path.toString().replaceAll("[^a-zA-Z0-9]", "-");
-  }
-
-  List<Path> transcriptDirs() {
-    Path projects = props.claudeProjectsPath();
-    if (!Files.isDirectory(projects)) {
-      return List.of();
-    }
-    Path workspace = active.get();
-    if (workspace == null) {
-      return List.of();
-    }
-    String prefix = escapeCwd(workspace);
-    try (Stream<Path> dirs = Files.list(projects)) {
-      // The exact directory, plus any session that was started in a subdirectory of it.
-      return dirs.filter(Files::isDirectory)
-          .filter(d -> d.getFileName().toString().startsWith(prefix))
-          .toList();
-    } catch (IOException e) {
-      return List.of();
-    }
-  }
-
   @Scheduled(fixedDelayString = "${watcher.transcript-poll-ms:500}")
   public void poll() {
-    for (Path dir : transcriptDirs()) {
-      try (Stream<Path> files = Files.list(dir)) {
-        for (Path file : files.filter(f -> f.toString().endsWith(".jsonl")).toList()) {
-          tail(file);
-        }
-      } catch (IOException e) {
-        log.debug("cannot list {}: {}", dir, e.toString());
-      }
+    for (Path file : locator.transcripts()) {
+      tail(file);
     }
   }
 
@@ -162,6 +130,14 @@ public class TranscriptTailService {
       return;
     }
     String session = root.path("sessionId").asString(null);
+
+    // Claude Code writes a generated title for the session into the transcript. Picking it up as
+    // it goes past turns an opaque session id into something selectable in the UI.
+    if ("ai-title".equals(root.path("type").asString(""))) {
+      sessions.recordTitle(session, root.path("aiTitle").asString(null));
+      return;
+    }
+
     JsonNode content = root.path("message").path("content");
     if (!content.isArray()) {
       return;
@@ -245,10 +221,6 @@ public class TranscriptTailService {
 
   /** Exposed for the status endpoint so the UI can say whether layer 1 is actually live. */
   public List<String> watchedTranscripts() {
-    List<String> result = new ArrayList<>();
-    for (Path dir : transcriptDirs()) {
-      result.add(dir.toString());
-    }
-    return result;
+    return locator.directories().stream().map(Path::toString).toList();
   }
 }

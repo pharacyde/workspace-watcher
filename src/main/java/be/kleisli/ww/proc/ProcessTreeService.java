@@ -71,10 +71,19 @@ public class ProcessTreeService {
   /** One {@code lsof} call for all processes, filtered to the workspace subtree. */
   private Map<Long, String> processesWithCwdIn(Path workspace) {
     Shell.Result result = Shell.run(null, List.of("lsof", "-a", "-d", "cwd", "-F", "pn"), 20);
+    return parseCwdLines(result.lines(), workspace);
+  }
+
+  /**
+   * Parses {@code lsof -F pn} output: a {@code p<pid>} line followed by an {@code n<path>} line.
+   *
+   * <p>Package-private so the parsing can be tested without running lsof.
+   */
+  static Map<Long, String> parseCwdLines(List<String> lines, Path workspace) {
     Map<Long, String> matched = new LinkedHashMap<>();
     Long pid = null;
     String prefix = workspace.toString();
-    for (String line : result.lines()) {
+    for (String line : lines) {
       if (line.isEmpty()) {
         continue;
       }

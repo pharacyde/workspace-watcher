@@ -1,7 +1,7 @@
 import '@lit-labs/virtualizer';
 import { css, html, LitElement } from 'lit';
-import { EventsDocument } from '../api/documents';
-import { EventLogController } from '../api/subscriptions';
+import { EventsDocument, SessionsDocument } from '../api/documents';
+import { EventLogController, LatestController } from '../api/subscriptions';
 import type { EventsSubscription, Source } from '../gql/graphql';
 import { panelStyles } from '../styles';
 
@@ -25,9 +25,11 @@ function label(source: Source, type: string): string {
 }
 
 export class Feed extends LitElement {
-  static properties = { hidden_: { state: true } };
+  static properties = { hidden_: { state: true }, session: { state: true } };
 
   declare private hidden_: Set<Source>;
+  /** Empty means every agent in this workspace. */
+  declare private session: string;
 
   static styles = [
     panelStyles,
@@ -72,20 +74,37 @@ export class Feed extends LitElement {
       lit-virtualizer {
         height: 100%;
       }
+      select {
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        font: inherit;
+        font-size: 11px;
+        padding: 0 3px;
+        max-width: 26ch;
+      }
     `,
   ];
 
   private readonly log = new EventLogController<Event>(this, EventsDocument, MAX_EVENTS);
+  private readonly sessions = new LatestController(this, SessionsDocument);
   private stuckToBottom = true;
 
   // Filtering runs on every render, and render runs once per animation frame. Recomputing over
   // MAX_EVENTS items each time is exactly the per-frame work the batching exists to avoid, so the
   // result is cached against the two inputs that can change it.
-  private cache: { items: Event[]; hidden: Set<Source>; result: Event[] } | null = null;
+  private cache: {
+    items: Event[];
+    hidden: Set<Source>;
+    session: string;
+    result: Event[];
+  } | null = null;
 
   constructor() {
     super();
     this.hidden_ = new Set();
+    this.session = '';
   }
 
   private toggle(source: Source) {
@@ -108,15 +127,47 @@ export class Feed extends LitElement {
   }
 
   private visibleEvents(): Event[] {
-    if (this.cache && this.cache.items === this.log.items && this.cache.hidden === this.hidden_) {
+    if (
+      this.cache &&
+      this.cache.items === this.log.items &&
+      this.cache.hidden === this.hidden_ &&
+      this.cache.session === this.session
+    ) {
       return this.cache.result;
     }
-    const result =
-      this.hidden_.size === 0
-        ? this.log.items
-        : this.log.items.filter((event) => !this.hidden_.has(event.source));
-    this.cache = { items: this.log.items, hidden: this.hidden_, result };
+    // Picking one agent hides everything that cannot be attributed to it, filesystem events
+    // included: they carry no session, so claiming they belong to the selected one would be a
+    // guess of exactly the kind this project refuses to make elsewhere.
+    const result = this.log.items.filter(
+      (event) =>
+        !this.hidden_.has(event.source) &&
+        (this.session === '' || event.sessionId === this.session),
+    );
+    this.cache = { items: this.log.items, hidden: this.hidden_, session: this.session, result };
     return result;
+  }
+
+  private sessionPicker() {
+    const entries = this.sessions.value?.sessions ?? [];
+    if (entries.length < 2) {
+      return '';
+    }
+    return html`
+      <select
+        title="Agent sessions in this workspace"
+        @change=${(event: globalThis.Event) =>
+          (this.session = (event.target as HTMLSelectElement).value)}
+      >
+        <option value="" ?selected=${this.session === ''}>all agents (${entries.length})</option>
+        ${entries.map(
+          (entry) => html`
+            <option value=${entry.id} ?selected=${entry.id === this.session}>
+              ${entry.live ? '● ' : ''}${entry.title ?? entry.id.slice(0, 8)}
+            </option>
+          `,
+        )}
+      </select>
+    `;
   }
 
   render() {
@@ -125,6 +176,7 @@ export class Feed extends LitElement {
       <h2>
         Activity
         <span class="count">${visible.length.toLocaleString()}</span>
+        ${this.sessionPicker()}
         <span class="filters">
           ${ALL_SOURCES.map(
             (source) => html`

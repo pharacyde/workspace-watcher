@@ -38,6 +38,17 @@ export const WatchWorkspaceDocument = graphql(`
   }
 `);
 
+export const SessionsDocument = graphql(`
+  subscription Sessions {
+    sessions {
+      id
+      title
+      lastActivity
+      live
+    }
+  }
+`);
+
 export const EventsDocument = graphql(`
   subscription Events {
     events {

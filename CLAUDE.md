@@ -87,6 +87,15 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
 - **`frontend/.npmrc` pins the public registry** so a corporate mirror, which typically lags npmjs
   by a patch, cannot make the lockfile unresolvable on someone else's machine.
 
+## Tests
+
+`mvn test`. 27 tests, deliberately aimed at the parsers and at the failure modes this project has
+actually hit rather than at coverage. `GitServiceTest.resolvesVersionsFromASubdirectoryWorkspace`
+is the regression test for the worst bug so far and should not be deleted.
+
+Fixtures are built in `@TempDir`, including real git repositories. Nothing touches the developer's
+own `~/.claude`.
+
 ## Things that are easy to get wrong
 
 - **Transcript directory naming.** Claude Code maps a working directory to a directory name by
@@ -120,6 +129,10 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
 - **The spool is a directory per project**, named with the same escaping Claude Code uses for
   transcripts, with a `.workspace` marker holding the real path because the escaping is not
   reversible. That marker is the whole registration mechanism.
+- **A session title cannot come from the tail alone.** The tail skips whatever a transcript already
+  contained when the watcher started, and Claude Code writes the `ai-title` near the beginning of a
+  session, so `SessionRegistry` searches each transcript once for it. Without that, every session
+  predating the watcher shows as an opaque identifier forever.
 - **`lsof +D` is a trap.** It walks the entire tree on every call. `lsof -a -d cwd -F pn` returns all
   processes' working directories in one cheap call; filter in Java.
 - **The subscription must not have a gap.** `EventBus.stream()` snapshots history and registers the

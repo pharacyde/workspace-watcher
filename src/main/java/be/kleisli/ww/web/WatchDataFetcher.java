@@ -1,6 +1,7 @@
 package be.kleisli.ww.web;
 
 import be.kleisli.ww.claude.HookEvents;
+import be.kleisli.ww.claude.SessionRegistry;
 import be.kleisli.ww.claude.TranscriptTailService;
 import be.kleisli.ww.claude.WorkspaceRegistry;
 import be.kleisli.ww.core.ActiveWorkspace;
@@ -10,6 +11,7 @@ import be.kleisli.ww.core.WatcherProperties;
 import be.kleisli.ww.generated.types.FileVersions;
 import be.kleisli.ww.generated.types.GitSnapshot;
 import be.kleisli.ww.generated.types.ProcessSnapshot;
+import be.kleisli.ww.generated.types.SessionEntry;
 import be.kleisli.ww.generated.types.Status;
 import be.kleisli.ww.generated.types.WorkspaceEntry;
 import be.kleisli.ww.git.GitService;
@@ -42,6 +44,7 @@ public class WatchDataFetcher {
   private final WatcherProperties properties;
   private final ActiveWorkspace active;
   private final WorkspaceRegistry registry;
+  private final SessionRegistry sessions;
   private final EventBus eventBus;
   private final GitService git;
   private final ProcessTreeService processes;
@@ -53,6 +56,7 @@ public class WatchDataFetcher {
       WatcherProperties properties,
       ActiveWorkspace active,
       WorkspaceRegistry registry,
+      SessionRegistry sessions,
       EventBus eventBus,
       GitService git,
       ProcessTreeService processes,
@@ -62,6 +66,7 @@ public class WatchDataFetcher {
     this.properties = properties;
     this.active = active;
     this.registry = registry;
+    this.sessions = sessions;
     this.eventBus = eventBus;
     this.git = git;
     this.processes = processes;
@@ -108,6 +113,12 @@ public class WatchDataFetcher {
     return mapper.toWorkspaces(registry.current());
   }
 
+  /** Agent sessions in the watched workspace, most recently active first. */
+  @DgsQuery
+  public List<SessionEntry> sessions() {
+    return mapper.toSessions(sessions.current());
+  }
+
   /** The chronicle: things that happened, in order. State does not belong here. */
   @DgsSubscription
   public Publisher<be.kleisli.ww.generated.types.WatchEvent> events() {
@@ -130,6 +141,12 @@ public class WatchDataFetcher {
   @DgsSubscription(field = "workspaces")
   public Publisher<List<WorkspaceEntry>> workspacesSubscription() {
     return registry.stream().flux().map(mapper::toWorkspaces);
+  }
+
+  /** Agent sessions in the watched workspace. */
+  @DgsSubscription(field = "sessions")
+  public Publisher<List<SessionEntry>> sessionsSubscription() {
+    return sessions.stream().flux().map(mapper::toSessions);
   }
 
   /** The workspace being watched. */

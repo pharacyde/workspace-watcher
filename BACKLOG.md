@@ -178,14 +178,22 @@ an Apple-granted entitlement and root. Worth a spike to size, not worth blocking
 `/proc/<pid>/cwd` replaces `lsof`, `inotify` replaces the poller. Needed for the remote-server use
 case that motivated the webapp in the first place.
 
-**P9-06 Subagent and MCP visibility** 🟢
+**P9-06 Subagent and MCP visibility** 🟡 partially done
+*Sessions are now a first-class filter: the register reads them from the transcript files, picks up
+the title Claude Code generates, and marks a session live while its transcript is still being
+written. Sidechains (subagents) and MCP servers are still not broken out as their own lanes.*
+
+**P9-06b (was P9-06) Original item** 🟢
 Transcripts distinguish sidechains (subagents) and MCP tool calls. Showing a subagent as its own
 lane, and MCP servers as their own actors, is nearly free and is exactly the "black box" the tool
 exists to open.
 
-**P9-07 Tests and CI** 🟢
-There are none. The transcript parser and the `lsof` parser both have fixture-shaped inputs and
-should be covered before the format shifts under them.
+**P9-07 Tests and CI** 🟡 tests done, CI still to do
+*27 tests covering the parsers and the bug classes this project actually hit: the git path
+resolution that broke when the workspace is a subdirectory, transcript tailing across partial lines
+and multi-byte characters and truncation, `lsof` output including a sibling directory that merely
+shares a prefix, hook payloads that are malformed or enormous, and an event stream that replays
+history then goes live without a gap, a duplicate, or an unbounded buffer. No CI pipeline yet.*
 
 **P9-08 Packaging** 🟢
 A single runnable jar exists. A Homebrew formula and a `docker run` recipe are what make it

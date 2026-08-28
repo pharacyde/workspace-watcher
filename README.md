@@ -69,7 +69,14 @@ with `--watcher.workspace=/path/to/project`.
 the result into the jar. Use `-DskipFrontend` to build the backend alone.
 
 Open <http://127.0.0.1:8080>. Then, in your own terminal, `cd` to a project and start Claude Code as
-you normally would. The schema explorer sits at <http://127.0.0.1:8080/graphiql>.
+you normally would.
+
+Two filters, in that order. The header picks the **workspace** — every project a hook has fired in
+registers itself, so the list fills as you work. The activity panel then picks the **agent session**
+within it, because one workspace often has several agents running in separate terminals, and every
+transcript and hook event already carries the session that produced it. Selecting one agent hides
+what cannot be attributed to it, filesystem events included: they carry no session, and claiming
+otherwise would be the guess this project refuses to make elsewhere. The schema explorer sits at <http://127.0.0.1:8080/graphiql>.
 
 If your default `java` is older than 25:
 

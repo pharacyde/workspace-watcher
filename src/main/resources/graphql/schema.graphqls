@@ -93,6 +93,22 @@ type WorkspaceEntry {
   exists: Boolean!
 }
 
+"""
+An agent session in the watched workspace.
+
+One workspace often has several agents working in it at once, in separate terminals. Every
+TRANSCRIPT and HOOK event carries the session that produced it, so this is the second filter: pick
+a workspace, then pick which agent in it to follow.
+"""
+type SessionEntry {
+  id: String!
+  "Title Claude Code generated for the session, when it has written one yet."
+  title: String
+  lastActivity: String!
+  "True while the transcript is still being written to."
+  live: Boolean!
+}
+
 type Status {
   "Null until a workspace has been chosen or discovered."
   workspace: String
@@ -113,6 +129,9 @@ type Query {
 
   "Every workspace that has registered itself, most recently active first."
   workspaces: [WorkspaceEntry!]!
+
+  "Agent sessions in the watched workspace, most recently active first."
+  sessions: [SessionEntry!]!
 }
 
 type Mutation {
@@ -155,4 +174,7 @@ type Subscription {
 
   "The workspace being watched. Emits on subscribe and whenever it is switched."
   activeWorkspace: String!
+
+  "Agent sessions in the watched workspace. Emits the present value on subscribe."
+  sessions: [SessionEntry!]!
 }
