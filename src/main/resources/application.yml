@@ -30,6 +30,10 @@ watcher:
   # Hooks spool here; must match WORKSPACE_WATCHER_SPOOL in hooks/workspace-watcher-hook.sh
   spool: ${user.home}/.claude/workspace-watcher-spool
   spool-poll-ms: 200
+  # Recorded history. Set database to an empty value to run without it.
+  database: ${user.home}/.claude/workspace-watcher/events.db
+  history-flush-ms: 500
+  retention-days: 30
   process-poll-ms: 2000
   history-size: 2000
 

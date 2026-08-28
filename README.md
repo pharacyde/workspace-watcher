@@ -100,6 +100,9 @@ query { fileVersions(path: "src/main/java/be/kleisli/ww/git/GitService.java") {
           head working binary tooLarge } }
 
 subscription { events { seq ts source type summary path agent sessionId detail } }
+
+# Recorded history, which outlives a restart
+query { history(since: "2026-08-28T10:00:00Z", limit: 500) { ts source summary agent } }
 ```
 
 `source` is the field worth reading first: `TRANSCRIPT` and `HOOK` carry real attribution, `FS`
@@ -182,6 +185,8 @@ Any property can be passed as `--watcher.foo=bar` or set in `application.yml`.
 | `watcher.spool-poll-ms` | `200` | spool drain interval |
 | `watcher.process-poll-ms` | `2000` | process sampling interval; `0` disables it |
 | `watcher.history-size` | `2000` | events replayed to a newly opened dashboard |
+| `watcher.database` | `~/.claude/workspace-watcher/events.db` | recorded history; empty disables it |
+| `watcher.retention-days` | `30` | how long history is kept |
 | `watcher.ignore-dirs` | `.git`, `node_modules`, `target`, … | never descended into |
 | `server.address` | `127.0.0.1` | **see Security** |
 | `spring.graphql.graphiql.enabled` | `true` | schema explorer at `/graphiql` |
@@ -209,7 +214,9 @@ Stated plainly, because a monitoring tool that overstates its coverage is worse 
   fall between two polls. For a complete record of what an agent ran, read the activity feed.
 - **Only agents with an adapter are attributed.** Today that means Claude Code, plus anything that
   can POST to the hook endpoint.
-- **Events are in memory.** A restart loses history. Persistence is [P9-01](BACKLOG.md).
+- **The live feed is in memory**, so it starts empty after a restart. Recorded history does not:
+  everything is also written to SQLite and reachable through `history`. The buffer holds minutes,
+  the database holds weeks.
 
 ## Developing
 

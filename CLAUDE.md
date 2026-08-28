@@ -139,6 +139,9 @@ own `~/.claude`.
   contained when the watcher started, and Claude Code writes the `ai-title` near the beginning of a
   session, so `SessionRegistry` searches each transcript once for it. Without that, every session
   predating the watcher shows as an opaque identifier forever.
+- **Recording must never slow a collector.** `EventStore` queues and flushes on a scheduler, and
+  drops the newest events if the queue fills rather than blocking. It also subscribes to the bus
+  instead of the bus knowing about it, so storage stays invisible to the thing being stored.
 - **`lsof +D` is a trap.** It walks the entire tree on every call. `lsof -a -d cwd -F pn` returns all
   processes' working directories in one cheap call; filter in Java.
 - **The subscription must not have a gap.** `EventBus.stream()` snapshots history and registers the

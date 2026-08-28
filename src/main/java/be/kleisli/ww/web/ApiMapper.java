@@ -12,6 +12,7 @@ import be.kleisli.ww.generated.types.Source;
 import be.kleisli.ww.generated.types.WorkspaceEntry;
 import be.kleisli.ww.git.GitService;
 import be.kleisli.ww.proc.ProcessTreeService;
+import be.kleisli.ww.store.EventStore;
 import java.util.List;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
@@ -83,6 +84,26 @@ public class ApiMapper {
                     .exists(entry.exists())
                     .build())
         .toList();
+  }
+
+  /**
+   * Maps a recorded row.
+   *
+   * <p>{@code detail} is already the JSON string it was stored as, so it is passed through rather
+   * than serialised again — encoding it twice would leave the client unwrapping a string.
+   */
+  public be.kleisli.ww.generated.types.WatchEvent toEvent(EventStore.Stored stored) {
+    return be.kleisli.ww.generated.types.WatchEvent.newBuilder()
+        .seq(stored.seq())
+        .ts(stored.ts())
+        .source(Source.valueOf(stored.source()))
+        .type(stored.type())
+        .summary(stored.summary())
+        .path(stored.path())
+        .agent(stored.agent())
+        .sessionId(stored.sessionId())
+        .detail(stored.detail())
+        .build();
   }
 
   public List<SessionEntry> toSessions(List<SessionRegistry.Entry> entries) {

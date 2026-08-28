@@ -59,6 +59,13 @@ public class WatcherProperties {
   /** How often the register of known workspaces is rescanned. */
   private long registryPollMs = 2000;
 
+  /** Where recorded history lives. Set to an empty value to run without persistence. */
+  private String database =
+      System.getProperty("user.home") + "/.claude/workspace-watcher/events.db";
+
+  /** How long recorded history is kept. */
+  private int retentionDays = 30;
+
   /** How often the spool directory is drained. Cheap: the directory is normally empty. */
   private long spoolPollMs = 200;
 
@@ -140,6 +147,22 @@ public class WatcherProperties {
 
   public void setSpool(String spool) {
     this.spool = spool;
+  }
+
+  public String getDatabase() {
+    return database;
+  }
+
+  public void setDatabase(String database) {
+    this.database = database;
+  }
+
+  public int getRetentionDays() {
+    return retentionDays;
+  }
+
+  public void setRetentionDays(int retentionDays) {
+    this.retentionDays = retentionDays;
   }
 
   public long getRegistryPollMs() {

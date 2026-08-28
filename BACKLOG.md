@@ -129,8 +129,9 @@ from guessing at FS events.*
 *Note: no log scraping needed. Token usage is on the assistant messages in the transcript, and
 Claude Code also exports OpenTelemetry metrics natively.*
 
-**P7-03 Execution timeline / session replay** 🟢
-*Needs persistence first — see P9-01. This is arguably the strongest feature in the whole list:
+**P7-03 Execution timeline / session replay** 🟢 — unblocked
+*Persistence is done (P9-01) and `history` already takes a time range, so what remains is the
+timeline UI itself. This is arguably the strongest feature in the whole list:
 scrubbing back through what an agent did over an hour is something no existing tool offers.*
 
 ## Epic 8 — Notifications & interactivity
@@ -147,9 +148,13 @@ opt-in as P4-01.*
 
 ## Epic 9 — Added: what the original list did not cover
 
-**P9-01 Event persistence (SQLite)** 🟢
-Events live in a 2000-entry ring buffer and die with the process. Persistence is the prerequisite
-for replay (P7-03), for cross-session history, and for surviving a restart.
+**P9-01 Event persistence (SQLite)** ✅
+*Everything the buffer holds is also written to SQLite, tagged with the workspace it belonged to,
+and reachable through `history(workspace, since, until, limit)`. Writes are queued and flushed in
+batches so a burst of file events never makes a collector wait on disk; if the queue fills, the
+newest are dropped and logged, because stalling a collector to protect the archive would be the
+wrong way round. Plain JDBC, one table: there is no object graph here and an ORM would be more
+machinery than the thing it manages. Verified against a SIGKILL rather than a clean shutdown.*
 
 **P9-02 Backpressure and throttling** ✅
 A `npm install` produces tens of thousands of file events. The feed needs coalescing per path and a

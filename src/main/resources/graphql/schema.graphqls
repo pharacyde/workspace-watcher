@@ -132,6 +132,20 @@ type Query {
 
   "Agent sessions in the watched workspace, most recently active first."
   sessions: [SessionEntry!]!
+
+  """
+  Recorded history, oldest first. Unlike the live feed this outlives a restart: the in-memory
+  buffer holds minutes, this holds weeks.
+
+  Defaults to the workspace being watched. `since` is inclusive and `until` exclusive, both
+  ISO-8601; omit either for an open end.
+  """
+  history(
+    workspace: String
+    since: String
+    until: String
+    limit: Int = 500
+  ): [WatchEvent!]!
 }
 
 type Mutation {

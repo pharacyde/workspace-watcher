@@ -16,6 +16,7 @@ import be.kleisli.ww.generated.types.Status;
 import be.kleisli.ww.generated.types.WorkspaceEntry;
 import be.kleisli.ww.git.GitService;
 import be.kleisli.ww.proc.ProcessTreeService;
+import be.kleisli.ww.store.EventStore;
 import com.netflix.graphql.dgs.DgsComponent;
 import com.netflix.graphql.dgs.DgsMutation;
 import com.netflix.graphql.dgs.DgsQuery;
@@ -45,6 +46,7 @@ public class WatchDataFetcher {
   private final ActiveWorkspace active;
   private final WorkspaceRegistry registry;
   private final SessionRegistry sessions;
+  private final EventStore store;
   private final EventBus eventBus;
   private final GitService git;
   private final ProcessTreeService processes;
@@ -57,6 +59,7 @@ public class WatchDataFetcher {
       ActiveWorkspace active,
       WorkspaceRegistry registry,
       SessionRegistry sessions,
+      EventStore store,
       EventBus eventBus,
       GitService git,
       ProcessTreeService processes,
@@ -67,6 +70,7 @@ public class WatchDataFetcher {
     this.active = active;
     this.registry = registry;
     this.sessions = sessions;
+    this.store = store;
     this.eventBus = eventBus;
     this.git = git;
     this.processes = processes;
@@ -117,6 +121,18 @@ public class WatchDataFetcher {
   @DgsQuery
   public List<SessionEntry> sessions() {
     return mapper.toSessions(sessions.current());
+  }
+
+  /** Recorded history, which outlives a restart. */
+  @DgsQuery
+  public List<be.kleisli.ww.generated.types.WatchEvent> history(
+      @InputArgument String workspace,
+      @InputArgument String since,
+      @InputArgument String until,
+      @InputArgument Integer limit) {
+    return store.history(workspace, since, until, limit == null ? 500 : limit).stream()
+        .map(mapper::toEvent)
+        .toList();
   }
 
   /** The chronicle: things that happened, in order. State does not belong here. */
