@@ -7,6 +7,7 @@ import {
   WorkspacesDocument,
 } from '../api/documents';
 import { LatestController } from '../api/subscriptions';
+import { titleWorkspace } from '../title';
 import './diff-panel';
 import './feed';
 import './git-panel';
@@ -164,6 +165,10 @@ export class App extends LitElement {
     this.addController({
       hostUpdate: () => {
         const current = this.active.value?.activeWorkspace ?? null;
+        // Several watchers on several projects are otherwise identical tabs. Only while there is
+        // an answer: `this.workspace` holds a sentence like "connecting…" until there is one, and
+        // a tab reading "connecting… · workspace-watcher" says less than the plain name.
+        if (current !== null) titleWorkspace(current);
         if (current !== null && previous !== null && current !== previous) {
           this.selected = null;
           this.selectedEvent = null;
@@ -178,6 +183,7 @@ export class App extends LitElement {
         // Null until a hook reveals a project: the watcher no longer needs to be told what to
         // look at, it waits to be shown.
         this.workspace = status.workspace ?? 'waiting for an agent to show a workspace…';
+        titleWorkspace(status.workspace ?? null);
         this.hasTranscripts = status.transcriptDirs.length > 0;
       })
       .catch(() => (this.workspace = 'backend unreachable'));

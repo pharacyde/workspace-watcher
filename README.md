@@ -301,8 +301,12 @@ The spool path is unaffected either way — it writes a file, not a request. Onl
 Failures, guard blocks and finished agents are announced while the tab is in the background, and
 only then: a notification for something you are already watching happen is noise.
 
+The tab is named after the workspace it is watching — `WW myproject` — so several watchers open
+on several projects are told apart in the tab strip. The name of the app is abbreviated on purpose:
+a tab shows a dozen characters, and it is the folder name that has to survive them.
+
 If the browser refuses permission — **Safari will not grant it on a plain `http` origin** — the tab
-title carries the count instead (`(3) workspace-watcher`), and the tab icon gets a red dot — drawn
+title carries the count instead (`(3) WW myproject`), and the tab icon gets a red dot — drawn
 on a canvas, so there is no asset to ship. In Safari a background tab is mostly its icon, with the
 title truncated to a few characters, which makes the dot the more visible half rather than the
 decoration on top.

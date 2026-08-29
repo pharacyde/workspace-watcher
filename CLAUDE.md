@@ -118,10 +118,12 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
 - **Do not guard the re-pin by comparing against where you last pinned.** It looks safer and is
   wrong: changing every row's height moves `scrollTop` by itself, because the browser keeps the
   reader's anchor, so a wrap toggle read as "a person scrolled" and switched following off.
-- **Following the tail listens for wheel/touch/key, never for `scroll`.** A scroll event cannot say
-  whose scroll it was: assigning `scrollTop` fires one, and measuring a layout the virtualizer was
-  still growing made an earlier version decide "not at the bottom" and switch following off
-  permanently — one row in, and the feed silently stopped.
+- **Whether to *stop* following is decided by wheel/touch/key, never by `scroll`.** A scroll event
+  cannot say whose scroll it was: assigning `scrollTop` fires one, and measuring a layout the
+  virtualizer was still growing made an earlier version decide "not at the bottom" and switch
+  following off permanently — one row in, and the feed silently stopped. There *is* a `scroll`
+  handler, added later and covered below, but it may only put the view back, never turn following
+  off.
 - **`lit-virtualizer` needs the `scroller` attribute to be its own scroll container.** Without it,
   it scrolls the nearest scrolling ancestor and setting `scrollTop` on the element does nothing.
   Scroll after awaiting `layoutComplete`; rows are measured asynchronously. Avoid `scrollToIndex` —
@@ -159,6 +161,23 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
   fix this however many rounds it gets — the only bound it can pick is a guess at how long measuring
   takes, and that grows with the list. The library says when it has done more work; listen to that.
   Found by the browser test on its first run, which is the whole argument for having one.
+- **`rangeChanged` is only half the signal: the height can grow without it.** A re-measurement that
+  makes the rows already on screen taller changes nothing about *which* items belong there, so the
+  virtualizer fires no event at all while the scroll area grows underneath the feed — measured at one
+  run in nine to fifteen, the feed stopped 391 px from the end with following on and stayed there
+  for thirty seconds. It
+  does state the new height, as a `transform` on its `[virtualizer-sizer]` child, so a
+  MutationObserver on that one attribute is the missing half. Remember the previous value: the
+  attribute is rewritten with an identical one on every update, and re-pinning on those spins
+  against the update it causes itself.
+- **The layout scrolls against the pin, and only a `scroll` event says so.** The flow layout keeps
+  its anchor item in place when estimated rows turn out to be a different size, which is right for a
+  reader and exactly wrong for following the tail: it is applied after our pin, so the feed reached
+  the bottom, was pulled back 692 px and stayed there — no `rangeChanged`, no change of height,
+  because from the layout's point of view nothing had happened. So the feed does listen for `scroll`
+  after all, and may only ever re-pin from it, never stop following: that stays with wheel, touch
+  and key, which fire first and have already answered the question by then. Being at the bottom
+  writes nothing, so the pin does not feed itself.
 - **The Playwright config is evaluated in the runner and again in every worker.** Anything random in
   it answers differently per process: `mkdtemp` there produced two directories, the runner started
   the watcher on one and the test wrote its files into the other, and the feed stayed empty for a
@@ -202,6 +221,13 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
   `"./*": "./esm/vs/*.js"`, so it is `monaco-editor/editor/editor.worker.js`, never
   `monaco-editor/esm/vs/...`. Languages are imported individually; importing the package root pulls
   in every language it ships (4.1 MB against 2.9 MB).
+- **The tab title is composed in one place (`src/title.ts`).** Two things want to speak in it - the
+  workspace this tab is watching, and how many notable events arrived while it was hidden - and both
+  used to assign `document.title`, which works only while there is one of them. It reads
+  `WW <folder>`: an abbreviation and the last path segment. A tab strip gives a title a dozen
+  characters before it truncates, so spelling out the name of the app - the same in every one of
+  these tabs - would spend them all on the half that cannot tell them apart. No logo in the string
+  either: the tab already draws the eye as its icon immediately to the left of it.
 - **`frontend/.npmrc` pins the public registry** so a corporate mirror, which typically lags npmjs
   by a patch, cannot make the lockfile unresolvable on someone else's machine.
 

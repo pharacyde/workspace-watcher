@@ -2,6 +2,7 @@ import { css, html, LitElement } from 'lit';
 import { subscribe } from '../api/client';
 import { EventsDocument } from '../api/documents';
 import type { EventsSubscription } from '../gql/graphql';
+import { titleMissed } from '../title';
 
 type FeedEvent = EventsSubscription['events'];
 
@@ -13,8 +14,6 @@ const LABELS: Record<Mode, string> = {
   notify: '🔔 notify',
   sound: '🔔 notify + sound',
 };
-
-const BASE_TITLE = 'workspace-watcher';
 
 /**
  * A short two-note tone as a WAV data URI.
@@ -213,7 +212,7 @@ export class Notify extends LitElement {
   private onVisibility = () => {
     if (document.hidden) return;
     this.missed = 0;
-    document.title = BASE_TITLE;
+    titleMissed(0);
     paintIcon(false);
   };
 
@@ -238,7 +237,7 @@ export class Notify extends LitElement {
     // in particular will not grant notifications on a plain http origin, and a feature that only
     // works in some browsers is worse than one that always does something.
     this.missed += 1;
-    document.title = `(${this.missed}) ${BASE_TITLE}`;
+    titleMissed(this.missed);
     paintIcon(true);
 
     const now = Date.now();

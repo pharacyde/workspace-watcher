@@ -328,6 +328,79 @@ export class Feed extends LitElement {
   };
 
   /**
+   * The other half of that signal: the scrollable height grew, but the rendered range did not
+   * change.
+   *
+   * <p>`rangeChanged` only fires when the virtualizer decides different items belong on screen. A
+   * re-measurement that only makes the rows it already renders taller leaves the range alone, so
+   * the total height grows with no event at all - and the feed then sits short of the end with
+   * nothing left to nudge it. Measured across suite runs at one in nine when it was found and one in
+   * fifteen when it was re-measured: the feed stopped 391 px from the bottom with following still
+   * on and stayed there for thirty seconds.
+   *
+   * <p>The virtualizer states that height as a `transform` on its sizer element, rewritten on every
+   * DOM update, so a MutationObserver on that one attribute is the library saying "the scroll area
+   * is now this tall" - the same argument as listening to `rangeChanged` rather than guessing with
+   * a settle loop. The previous value is remembered because the attribute is also rewritten with an
+   * identical value, and re-pinning on those would spin against the update they themselves cause.
+   */
+  private readonly sizeObserver = new MutationObserver(() => {
+    const sizer = this.sizer;
+    if (!sizer || sizer.style.transform === this.scrollSize) return;
+    this.scrollSize = sizer.style.transform;
+    this.onRangeChanged();
+  });
+  private sizer: HTMLElement | null = null;
+  private scrollSize = '';
+
+  /**
+   * Attaches the observer to the sizer, which the virtualizer creates lazily and only once it has
+   * a size to report - so the element does not exist on the first render and this is re-checked
+   * every update rather than set up once.
+   */
+  private watchScrollSize() {
+    const sizer = this.list?.querySelector<HTMLElement>('[virtualizer-sizer]') ?? null;
+    if (sizer === this.sizer) return;
+    this.sizeObserver.disconnect();
+    this.sizer = sizer;
+    this.scrollSize = sizer?.style.transform ?? '';
+    if (sizer) this.sizeObserver.observe(sizer, { attributes: true, attributeFilter: ['style'] });
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this.sizeObserver.disconnect();
+    this.sizer = null;
+  }
+
+  /**
+   * Undoes a scroll the virtualizer performed against us.
+   *
+   * <p>The flow layout keeps its anchor item in place across a re-measurement: when rows that were
+   * estimated turn out to be a different size, it scrolls the DOM by the difference so what you
+   * were reading stays under your eyes. Following the tail is the one case where that is exactly
+   * wrong, and it is applied *after* our own pin - measured, the feed sat at the bottom, was pulled
+   * back 692 px and stayed there, with no rangeChanged and no change in height afterwards, because
+   * from the layout's point of view nothing had changed at all. Nothing else can notice that: the
+   * only thing that happened is a scroll.
+   *
+   * <p>This is not the handler CLAUDE.md warns about. A scroll event cannot say whose scroll it
+   * was, so it may never decide to stop following - that stays with wheel, touch and key, which
+   * fire before the scroll and have already set `follow` to false by the time this runs. All it
+   * does is put the view back where following says it belongs, and being already there is the
+   * common case and writes nothing, so our own pin does not feed itself.
+   */
+  private onScroll = () => {
+    if (!this.follow || this.replay) return;
+    const list = this.list;
+    if (!list) return;
+    // A pixel of slack: scrollTop is fractional on a scaled display and an exact comparison would
+    // rewrite it forever.
+    if (list.scrollHeight - list.scrollTop - list.clientHeight <= 1) return;
+    this.pin(list);
+  };
+
+  /**
    * Supersedes an in-flight followTail. updated() fires one per frame while events stream, and the
    * settle loop below spans several frames, so without this they overlap and each one forces its
    * own layout - on exactly the frame budget the batching in this component exists to protect.
@@ -350,6 +423,10 @@ export class Feed extends LitElement {
     // remove, and it threw "Cannot set properties of null" on a row it had not laid out yet.
     // With the scroller attribute set, this element is the scroll container, so this is direct.
     await list.layoutComplete;
+    // The sizer exists once the virtualizer has laid out, which is here rather than in updated():
+    // on a feed that then goes quiet the next update may be minutes away, and the observer has to
+    // be watching before the re-measurement it exists to catch.
+    this.watchScrollSize();
     if (!this.follow) return;
 
     // Deliberately not checking the generation here. layoutComplete routinely takes longer than a
@@ -376,6 +453,7 @@ export class Feed extends LitElement {
   }
 
   updated(changed: Map<string, unknown>) {
+    this.watchScrollSize();
     void this.followTail(this.visibleEvents().length);
     if (changed.has('workspace') && changed.get('workspace') != null) {
       // A switch starts a new chronicle. Keeping the old events, or a session filter naming a
@@ -516,6 +594,7 @@ export class Feed extends LitElement {
                 @touchmove=${this.onUserScroll}
                 @keydown=${this.onUserScroll}
                 @rangeChanged=${this.onRangeChanged}
+                @scroll=${this.onScroll}
                 .items=${visible}
                 .renderItem=${(row: Row | undefined) => {
                   // The virtualizer can ask for an index the list no longer has, in the frame

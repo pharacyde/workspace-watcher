@@ -247,12 +247,27 @@ opgeloste paden, dus een workspace onder `/tmp` (link naar `/private/tmp`) filte
 en het paneel bleef leeg zonder foutmelding. De browsertest vond het, omdat die in zo'n map draait;
 de unittests niet, omdat die met paden werken die niet bestaan.*
 
-**P10-19 De feed stopt af en toe met volgen bij wrap aan** 🟡 *(gevonden door de browsertest)*
-*Eén op de negen runs blijft de feed 391 px van het einde staan met volgen aan, en komt daar in
-dertig seconden niet meer weg - dus er komt geen `rangeChanged` meer waarop opnieuw vastgezet kan
-worden. Zelfde familie als de bug die er al zit: de virtualizer meet zijn rijen asynchroon en de
-hoogte groeit in stappen. Reproduceerbaar met de suite in een lus; `toggling wrap does not break
-following` is de test die valt.*
+**P10-19 De feed stopt af en toe met volgen** ✅ *(gevonden door de browsertest)*
+*Het waren er twee, en de tweede kwam pas boven water toen de eerste weg was. (1) Een hermeting die
+alleen de rijen die al op het scherm staan hoger maakt verandert niets aan wélke items er horen,
+dus komt er geen `rangeChanged` terwijl de hoogte wel groeit - één op de vijftien runs bleef 391 px
+van het einde staan. De virtualizer noemt die nieuwe hoogte wel, als een `transform` op zijn
+`[virtualizer-sizer]`, dus een MutationObserver op dat ene attribuut is de ontbrekende helft. (2)
+Daarna verscheen een andere: de flow-layout houdt zijn ankerrij op zijn plaats als geschatte rijen
+anders blijken te meten, en past dat toe ná ons vastzetten - de feed stond onderaan, werd 692 px
+teruggetrokken en bleef daar, zonder `rangeChanged` en zonder hoogteverschil, want voor de layout
+was er niets gebeurd. Alleen een `scroll` zegt dat nog. Die luistert de feed nu dus wél af, maar
+uitsluitend om terug te zetten, nooit om het volgen uit te zetten - dat blijft bij wheel, touch en
+toets, die eerder vuren. Gemeten met de suite in een lus: 1 van de 15 fout voor, 0 van de 30 en
+0 van de 20 na. Het onderzoek liep via tijdelijke instrumentatie in de feed, die de laatste 160
+gebeurtenissen dumpt bij een falende test - het scrollspoor 2380 → 1688 was de hele diagnose.*
+
+**P10-20 De workspace-naam in de tabtitel** ✅ *(gevraagd tijdens gebruik)*
+*Met meerdere watchers open waren de tabs niet uit elkaar te houden. De titel is nu
+`WW <map>`: een afkorting en de laatste padnaam - de mappen ervoor zijn juist wat ze gemeen hebben.
+De naam van de app niet voluit, want een tab toont een karakter of tien en die horen naar de mapnaam
+te gaan; en geen logo in de tekst, want de tab tekent het oog er als icoon al pal naast. `src/title.ts` stelt de titel samen, want de badge met gemiste gebeurtenissen schrijft er
+ook in en wie als tweede `document.title` zet wist de helft van de ander.*
 
 **P10-17 In een jar of zip kijken vanuit het procesdetail** 🟢 *(gevraagd tijdens gebruik)*
 *Een proces houdt zijn eigen jar of zip open, en daar houdt het paneel nu op: de tail antwoordt

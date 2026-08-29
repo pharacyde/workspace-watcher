@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { appendFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -215,6 +215,18 @@ test.describe('workspace-watcher dashboard', () => {
     // The header pill is the app's own statement that the socket is up. Anything else here means
     // the panels are decoration over a dead connection.
     await expect(page.locator('ww-app .pill.live')).toHaveText('live', { timeout: SCAN_TIMEOUT });
+  });
+
+  test('the tab is named after the workspace', async () => {
+    // Several watchers on several projects are otherwise identical tabs, which is the whole point
+    // of the name being there. It arrives with the active workspace rather than with the document,
+    // so it is polled.
+    await expect
+      .poll(() => page.title(), {
+        timeout: SCAN_TIMEOUT,
+        message: 'the tab never took the name of the workspace',
+      })
+      .toBe(`WW ${basename(WORKSPACE)}`);
   });
 
   test('writing files fills the activity feed', async () => {
