@@ -29,6 +29,13 @@ Note Spring Boot 4 ships **Jackson 3**: the package is `tools.jackson.databind`,
 `com.fasterxml.jackson.databind`. `asText()` and `isTextual()` are deprecated in favour of
 `asString()` and `isString()`, and parse failures are unchecked exceptions.
 
+Run it from a **copy** of the jar, not from `target/` itself. A Spring Boot fat jar is read lazily
+- nested jars stay compressed until a class is first needed - so rebuilding while the app runs
+pulls the file out from under the running JVM. It does not fail at once: the pages already served
+keep working, and then a refresh hangs while the log fills with
+`NoClassDefFoundError: ch/qos/logback/classic/spi/ThrowableProxy`, because even Tomcat's error path
+needs a class it can no longer load. `cp target/*.jar target/run/watcher.jar` and start that one.
+
 ## Design invariants
 
 These are the decisions the project exists to hold. Do not quietly relax them.

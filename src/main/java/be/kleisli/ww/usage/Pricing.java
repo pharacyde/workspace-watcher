@@ -87,7 +87,34 @@ public class Pricing {
   }
 
   public boolean knows(String model) {
-    return model != null && models.containsKey(model);
+    return rates(model) != null;
+  }
+
+  /**
+   * The rates for a model, allowing for the date a transcript appends to its name.
+   *
+   * <p>Claude Code writes {@code claude-haiku-4-5-20251001} where the table says {@code
+   * claude-haiku-4-5}, so an exact lookup reported a model that is priced right here as unpriced -
+   * measured on this machine: 683,763 tokens left out of the total and named in the header as
+   * having no price. A dated snapshot of a model is that model, at those rates.
+   *
+   * <p>Longest match wins, so a future {@code claude-opus-5-1} takes its own entry rather than the
+   * one for {@code claude-opus-5}, and the boundary is a dash so {@code claude-opus-50} could never
+   * borrow it.
+   */
+  private Rates rates(String model) {
+    if (model == null) {
+      return null;
+    }
+    Rates exact = models.get(model);
+    if (exact != null) {
+      return exact;
+    }
+    return models.entrySet().stream()
+        .filter(entry -> model.startsWith(entry.getKey() + "-"))
+        .max(java.util.Comparator.comparingInt(entry -> entry.getKey().length()))
+        .map(Map.Entry::getValue)
+        .orElse(null);
   }
 
   /**
@@ -99,7 +126,7 @@ public class Pricing {
    * would be wrong by orders of magnitude.
    */
   public Double cost(String model, TokenUsage tokens) {
-    Rates rates = models.get(model);
+    Rates rates = rates(model);
     if (rates == null) {
       return null;
     }

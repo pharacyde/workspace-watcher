@@ -220,6 +220,23 @@ export class UsagePill extends LitElement {
     return window.scope ? `${name} · ${window.scope}` : name;
   }
 
+  /**
+   * The plan as a person would say it, from the identifier the config stores.
+   *
+   * <p>"default_claude_max_20x" is what Claude Code writes down; it is not what anyone calls their
+   * subscription. Mechanical rather than a lookup table, so a tier that does not exist yet still
+   * reads as something, and the raw value survives if the shape ever changes.
+   */
+  private static planName(plan: string) {
+    const words = plan
+      .replace(/^default_/, '')
+      .replace(/^claude_/, '')
+      .split('_')
+      .filter(Boolean)
+      .map((w) => (/^\d+x$/.test(w) ? w.replace('x', '×') : w[0].toUpperCase() + w.slice(1)));
+    return words.length ? `Claude ${words.join(' ')}` : plan;
+  }
+
   private static ago(iso: string | null) {
     if (!iso) return 'at a moment it does not record';
     const minutes = Math.round((Date.now() - Date.parse(iso)) / 60_000);
@@ -307,19 +324,23 @@ export class UsagePill extends LitElement {
                   <div class="note">
                     ${
                       approx
-                        ? html`not a bill — what these tokens would cost at API rates.<br />
-                            billed as
-                            ${this.usage.billingMode}${
-                            this.usage.plan ? html` · ${this.usage.plan}` : ''
-                          }`
-                        : html`billed per token at API rates`
+                        ? html`${
+                            this.usage.plan
+                              ? html`On ${UsagePill.planName(this.usage.plan)} you do not pay per
+                                token.`
+                              : html`On a subscription you do not pay per token.`
+                          }
+                          This is what this much work would have cost at API rates: a measure of
+                          weight, not a bill. What you are spending is the allowance below.`
+                        : html`Billed per token at API rates.`
                     }
                   </div>
                   ${
                     this.usage.unpricedModels.length
                       ? html`<div class="note">
-                          not counted: ${this.usage.unpricedModels.join(', ')} — no price in
-                          pricing.json
+                          ${this.usage.unpricedModels.join(', ')}: tokens counted, cost not. No
+                          rate is known for it — a model run locally has none to know — so whatever
+                          it cost is not in the figure above.
                         </div>`
                       : ''
                   }
@@ -341,7 +362,12 @@ export class UsagePill extends LitElement {
                     : ''
                 }
                 <div class="models">
-                  ${models.map(
+                  ${models
+                    // A model that carried no tokens has nothing to say here: <synthetic> is
+                    // Claude Code's own placeholder and appeared as a row reading "unpriced",
+                    // which is a fact about a model nobody used.
+                    .filter((m) => m.tokens.total > 0)
+                    .map(
                     (m) => html`
                       <div>
                         ${m.model} · ${m.costUsd === null ? 'unpriced' : `$${m.costUsd.toFixed(2)}`}

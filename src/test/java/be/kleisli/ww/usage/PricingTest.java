@@ -120,4 +120,33 @@ class PricingTest {
     assertThat(new Pricing(mapper, props).cost("claude-opus-5", TokenUsage.NONE))
         .isCloseTo(0.0, within(0.000001));
   }
+
+  @Test
+  @DisplayName("a dated model id is priced as the model it is a snapshot of")
+  void datedModelIdsArePriced() {
+    // Claude Code writes claude-haiku-4-5-20251001 where the table says claude-haiku-4-5, and an
+    // exact lookup called it unpriced: measured on this machine, 683,763 tokens left out of the
+    // total and the model named in the header as having no price.
+    Pricing pricing = new Pricing(mapper, props);
+
+    assertThat(pricing.knows("claude-haiku-4-5-20251001")).isTrue();
+    assertThat(pricing.cost("claude-haiku-4-5-20251001", new TokenUsage(1_000_000, 0, 0, 0, 0)))
+        .isEqualTo(pricing.cost("claude-haiku-4-5", new TokenUsage(1_000_000, 0, 0, 0, 0)));
+  }
+
+  @Test
+  @DisplayName("a longer entry wins, and a name that merely starts the same does not")
+  void prefixMatchingHasABoundary() throws IOException {
+    writeOverride(
+        """
+        {"models": {"claude-opus-5-1": {"input": 1, "output": 2}}}
+        """);
+    Pricing pricing = new Pricing(mapper, props);
+
+    // claude-opus-5-1-20260401 is a snapshot of 5-1, not of 5.
+    assertThat(pricing.cost("claude-opus-5-1-20260401", new TokenUsage(1_000_000, 0, 0, 0, 0)))
+        .isCloseTo(1.0, within(0.001));
+    // A dash is the boundary, so nothing borrows the rates of a name it merely begins with.
+    assertThat(pricing.knows("claude-opus-50")).isFalse();
+  }
 }
