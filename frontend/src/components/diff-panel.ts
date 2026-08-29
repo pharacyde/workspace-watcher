@@ -1,11 +1,19 @@
 import { css, html, LitElement } from 'lit';
 import { request, subscribe } from '../api/client';
-import { FileChangedDocument, FileTailDocument, FileVersionsDocument } from '../api/documents';
+import {
+  FileChangedDocument,
+  FileTailDocument,
+  FileVersionsDocument,
+  ProcessFilesDocument,
+} from '../api/documents';
 import type { EventsSubscription } from '../gql/graphql';
 import { panelStyles } from '../styles';
 import { languageFor, loadMonaco, monacoStyleSheet, type DiffEditor } from './monaco';
 
 type FeedEvent = EventsSubscription['events'];
+
+type SelectedProcess = { pid: string; command: string; cwd: string };
+type OpenFile = { fd: string; mode: string; path: string; relativePath: string | null };
 
 /** How much of a file to keep in the browser. The end is the part being watched. */
 const CONTENT_LIMIT = 400_000;
@@ -80,6 +88,10 @@ export class DiffPanel extends LitElement {
   static properties = {
     path: { type: String },
     event: { attribute: false },
+    process: { attribute: false },
+    openFiles: { state: true },
+    openFilesFailed: { state: true },
+    tailPath: { state: true },
     view: { state: true },
     content: { state: true },
     contentNote: { state: true },
@@ -93,6 +105,13 @@ export class DiffPanel extends LitElement {
   declare path: string | null;
   /** When set, the panel inspects this event instead of diffing a file. */
   declare event: FeedEvent | null;
+  /** When set, the panel inspects this process instead of a file or an event. */
+  declare process: SelectedProcess | null;
+  /** What that process has open, or null while it is being asked for. */
+  declare private openFiles: OpenFile[] | null;
+  declare private openFilesFailed: boolean;
+  /** A file opened from the process view, followed in place. */
+  declare private tailPath: string | null;
   /** For an event that names a file: its content, or the event's own record. */
   declare private view: 'content' | 'record';
   declare private content: string;
@@ -130,6 +149,32 @@ export class DiffPanel extends LitElement {
       .monaco {
         height: 100%;
         width: 100%;
+      }
+      .facts {
+        border-collapse: collapse;
+        margin: 2px 12px 6px;
+      }
+      .facts td {
+        vertical-align: top;
+        padding: 1px 0;
+      }
+      .facts td.k {
+        color: var(--dim);
+        padding-right: 12px;
+        white-space: nowrap;
+      }
+      .facts pre {
+        margin: 0;
+      }
+      .fd {
+        color: var(--dim);
+        flex: none;
+        width: 4ch;
+        text-align: right;
+      }
+      .clickable {
+        cursor: pointer;
+        color: var(--text);
       }
       .live {
         border: 1px solid var(--add);
@@ -235,6 +280,10 @@ export class DiffPanel extends LitElement {
     super();
     this.path = null;
     this.event = null;
+    this.process = null;
+    this.openFiles = null;
+    this.openFilesFailed = false;
+    this.tailPath = null;
     this.message = 'select a row or a file to inspect it';
     this.diffNote = null;
     this.diffLive = false;
@@ -432,13 +481,28 @@ export class DiffPanel extends LitElement {
   }
 
   updated(changed: Map<string, unknown>) {
+    if (changed.has('process')) {
+      // A new process is a new question; whatever file was open belonged to the previous one.
+      this.tailPath = null;
+      this.openFiles = null;
+      this.openFilesFailed = false;
+      if (this.process) void this.loadOpenFiles(this.process.pid);
+    }
     // Anything other than "we are showing this file" stops the stream. Testing only for !event
     // left it running when the selection moved to an event with no path at all - a Bash call, say -
     // so a log kept streaming into a panel that was showing something else entirely.
-    if (this.event?.path && this.view === 'content') {
+    if (this.tailPath) {
+      this.follow(this.tailPath);
+    } else if (this.event?.path && this.view === 'content') {
       this.follow(this.event.path);
     } else {
       this.stopFollowing();
+    }
+    if (this.process) {
+      // The diff container has left the DOM, exactly as it does for an event.
+      this.stopWatchingDiff();
+      this.disposeEditor();
+      return;
     }
     if (!changed.has('path') && !changed.has('event')) return;
     if (changed.has('event')) {
@@ -517,6 +581,77 @@ export class DiffPanel extends LitElement {
       });
   }
 
+  private async loadOpenFiles(pid: string) {
+    try {
+      const { processFiles } = await request(ProcessFilesDocument, { pid });
+      // The click may have moved on while lsof was running.
+      if (this.process?.pid === pid) {
+        this.openFiles = processFiles as OpenFile[];
+        this.openFilesFailed = false;
+      }
+    } catch {
+      // Not an empty list: that reads as "this process holds nothing open", which is a different
+      // statement than "we could not find out".
+      if (this.process?.pid === pid) this.openFilesFailed = true;
+    }
+  }
+
+  /**
+   * The files a process holds, and the way through to reading one.
+   *
+   * <p>A file inside the workspace opens in the tail view, which is the point of the list: a
+   * descriptor 1 pointing at a build log is how you get from "something is running" to watching
+   * what it writes. A file outside the workspace is named and not clickable - this app serves file
+   * contents over a port with no auth, and the tail refuses anything outside for that reason.
+   */
+  private renderProcess(process: SelectedProcess) {
+    return html`
+      <div class="meta">
+        <span class="tag">process</span>
+        <span>pid ${process.pid}</span>
+      </div>
+      <table class="facts">
+        <tr>
+          <td class="k">command</td>
+          <td><pre class="detail wrap">${process.command}</pre></td>
+        </tr>
+        <tr>
+          <td class="k">cwd</td>
+          <td>${process.cwd}</td>
+        </tr>
+      </table>
+      <div class="meta">
+        <span class="tag">open files</span>
+        ${this.openFiles ? html`<span>${this.openFiles.length}</span>` : ''}
+      </div>
+      ${this.openFilesFailed
+        ? html`<p class="empty">could not ask lsof what this process has open</p>`
+        : this.openFiles === null
+        ? html`<p class="empty">asking lsof…</p>`
+        : this.openFiles.length === 0
+          ? html`<p class="empty">no regular files open on a numbered descriptor</p>`
+          : this.openFiles.map((file) => this.openFileRow(file))}
+      <p class="empty">
+        A sample taken just now: a descriptor closed a moment later is still listed here, and the
+        executable and shared libraries are left out deliberately.
+      </p>
+    `;
+  }
+
+  private openFileRow(file: OpenFile) {
+    const inside = file.relativePath !== null;
+    return html`
+      <div
+        class="rowline ${inside ? 'clickable' : ''}"
+        title=${inside ? 'open this file' : 'outside the workspace, so it is not served from here'}
+        @click=${() => (inside ? (this.tailPath = file.relativePath) : undefined)}
+      >
+        <span class="fd">${file.fd}${file.mode}</span>
+        <span class="ellipsis">${file.relativePath ?? file.path}</span>
+      </div>
+    `;
+  }
+
   private renderEvent(event: FeedEvent) {
     let detail: Record<string, unknown> | null = null;
     try {
@@ -584,6 +719,23 @@ export class DiffPanel extends LitElement {
   }
 
   render() {
+    if (this.process) {
+      const process = this.process;
+      return html`
+        <h2>
+          ${this.tailPath ? 'File' : 'Process'}
+          <span class="note">${this.tailPath ?? process.command}</span>
+          ${this.tailPath
+            ? html`<button class="switch" @click=${() => (this.tailPath = null)}>
+                back to pid ${process.pid}
+              </button>`
+            : ''}
+        </h2>
+        <div class="body event-body ${this.tailPath ? 'file' : ''}">
+          ${this.tailPath ? this.renderContent(this.tailPath) : this.renderProcess(process)}
+        </div>
+      `;
+    }
     if (this.event) {
       const path = this.event.path;
       return html`

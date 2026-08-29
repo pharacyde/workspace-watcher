@@ -186,6 +186,19 @@ public class ApiMapper {
         .build();
   }
 
+  public List<be.kleisli.ww.generated.types.OpenFile> toOpenFiles(
+      List<ProcessTreeService.OpenFile> files) {
+    return files.stream()
+        .map(
+            f ->
+                be.kleisli.ww.generated.types.OpenFile.newBuilder()
+                    .fd(f.fd())
+                    .mode(f.mode())
+                    .path(f.path())
+                    .relativePath(f.relativePath())
+                    .build())
+        .toList();
+  }
 
   public UsageSummary toUsage(UsageService.Summary summary, AccountLimits.Snapshot limits) {
     return UsageSummary.newBuilder()

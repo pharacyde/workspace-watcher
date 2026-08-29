@@ -88,6 +88,15 @@ percentage and megabytes share no axis worth drawing.
 No GPU or Neural Engine, and not for want of trying: `powermetrics` refuses to run without root, and
 even with it reports system-wide figures rather than per-process ones.
 
+**Click a process** and the inspector shows its whole command line — the row runs out of width long
+before the arguments do — its working directory, and the files it currently has open. Numeric
+descriptors only: a process also holds its executable and every shared library open, which is a
+hundred rows around the handful anyone means. Descriptor 1 or 2 pointing at a file is the one worth
+clicking, because that is where the log is being written; a file inside the workspace opens in the
+tail view and keeps arriving. A file outside the workspace is named but not opened — this dashboard
+serves file contents with no auth, and the tail refuses anything outside for that reason. It also
+cannot see a descriptor that does not stay open: a shell appending with `>>` reopens the file per
+line and never appears in `lsof` at all.
 
 Older text, kept for the shape of the argument: They look
 alike and are not — a hundred file events and one enormous prompt are indistinguishable in a count

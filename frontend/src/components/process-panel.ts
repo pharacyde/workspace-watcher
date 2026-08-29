@@ -6,9 +6,12 @@ import { panelStyles } from '../styles';
 type Node = { pid: string; command: string; cwd: string; children?: readonly Node[] | null };
 
 export class ProcessPanel extends LitElement {
-  static properties = { search: { attribute: false } };
+  static properties = { search: { attribute: false }, selectedPid: { attribute: false } };
 
   declare search: string;
+  /** Held by the app, like the working tree's selection: a second copy here stayed highlighted
+   * after another panel took the inspector. */
+  declare selectedPid: string | null;
 
   static styles = [
     panelStyles,
@@ -18,6 +21,15 @@ export class ProcessPanel extends LitElement {
         flex: none;
         white-space: pre;
       }
+      .rowline {
+        cursor: pointer;
+      }
+      /* .rowline:hover in panelStyles is more specific than a bare .selected, so the row you just
+         clicked lost its highlight under the pointer that clicked it. */
+      .rowline.selected,
+      .rowline.selected:hover {
+        background: #222a36;
+      }
     `,
   ];
 
@@ -26,6 +38,7 @@ export class ProcessPanel extends LitElement {
   constructor() {
     super();
     this.search = '';
+    this.selectedPid = null;
   }
 
   /** A match anywhere in a subtree keeps that subtree, so a hit is never orphaned from its parent. */
@@ -35,10 +48,30 @@ export class ProcessPanel extends LitElement {
     return (node.children ?? []).some((child) => this.subtreeMatches(child, needle));
   }
 
+  /**
+   * Sends the clicked process to the inspector.
+   *
+   * <p>The row is where the command line runs out of width, so clicking it has something to say:
+   * the whole command, the working directory, and what the process has open - which is how you get
+   * from "something is running" to the log it is writing.
+   */
+  private select(node: Node) {
+    this.dispatchEvent(
+      new CustomEvent('process-selected', {
+        detail: { pid: node.pid, command: node.command, cwd: node.cwd },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
   private row(node: Node, depth: number): TemplateResult[] {
     const indent = '  '.repeat(depth) + (depth > 0 ? '└─ ' : '');
     return [
-      html`<div class="rowline">
+      html`<div
+        class="rowline ${node.pid === this.selectedPid ? 'selected' : ''}"
+        @click=${() => this.select(node)}
+      >
         <span class="pid">${indent}${node.pid}</span>
         <span class="ellipsis">${node.command}</span>
       </div>`,

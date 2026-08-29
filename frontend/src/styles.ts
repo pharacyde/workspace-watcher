@@ -59,6 +59,33 @@ export const panelStyles = css`
     content-visibility: auto;
   }
 
+  /* macOS hides overlay scrollbars until something scrolls, so a panel holding more than it can
+     show looks exactly like one holding all of it - measured on the process panel: 288 px of rows
+     in a 155 px body, scrollable the whole time, with nothing on screen saying so. Both spellings
+     are here because they reach different engines: scrollbar-width and scrollbar-color are what
+     Firefox reads, ::-webkit-scrollbar is what Chromium and Safari read. Neither could be verified
+     headless - Chromium there keeps its overlay scrollbar and reports a zero-width gutter either
+     way - so this is not yet known to be visible on macOS. */
+  .body {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+  }
+
+  .body::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  .body::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border-radius: 5px;
+  }
+  .body::-webkit-scrollbar-thumb:hover {
+    background: var(--dim);
+  }
+  .body::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
   .empty {
     color: var(--dim);
     padding: 8px 12px;

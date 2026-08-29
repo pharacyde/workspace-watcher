@@ -201,7 +201,7 @@ LTS the build targets and the minimum the README promises — and runs the tests
 because that is the platform the process layer is written against and a green Linux build says
 less here than it usually would. Standard runners are free on public repositories.
 
-`mvn test`. 150 tests, deliberately aimed at the parsers and at the failure modes this project has
+`mvn test`. 153 tests, deliberately aimed at the parsers and at the failure modes this project has
 actually hit rather than at a coverage number. `GitServiceTest.resolvesVersionsFromASubdirectoryWorkspace`
 is the regression test for the worst bug so far and should not be deleted.
 
@@ -232,6 +232,17 @@ not need paying for twice.
   Replaying a finished session would bury the live one.
 - **Partial lines.** The tail only consumes up to the last newline in the chunk it read, and advances
   the byte offset by exactly that much — otherwise a half-flushed line corrupts UTF-8 decoding.
+- **`Shell.run`'s timeout needs a watchdog; `waitFor` alone is not one.** stdout has to be read to
+  EOF before waiting, or a chatty command deadlocks on a full pipe - and EOF only arrives when the
+  child exits. Measured with `sleep 30` and a one-second timeout: `readAllBytes` returned after
+  30.0s and the timeout was never consulted. It read as bounded and was not, which is the worst way
+  for a limit to be wrong, and `processFiles` had just put `lsof` on a user-triggered request
+  thread. A daemon watchdog destroys the process when the time is up; the test that covers it fails
+  in 30s against the old code and passes in 1s against this one.
+- **`processFiles` only answers for a process the panel is already showing.** Without that check
+  anything reaching the loopback port could walk pids 1..N and read the paths of every file every
+  process on the machine holds open. Invariant 4 trades source diffs and command lines for
+  convenience, not the whole machine, and a path is disclosure even when the contents are refused.
 - **The hook script must stay fast and silent.** It runs on every tool call and blocks the agent
   until it returns. Default path is a spool file: ~5 ms, no dependencies, and the event survives the
   watcher being down. Do not "simplify" this to a network call — that trade was measured and lost.
@@ -255,6 +266,20 @@ not need paying for twice.
   nobody touches it. That is the row worth pointing at, because it is the one where opening the
   panel gives you a log that keeps arriving. Carried in the event type rather than a new field, so
   it costs nothing in the schema or the database.
+- **lsof answers in resolved paths, so a symlinked workspace matched nothing.** On macOS `/tmp` is
+  a link to `/private/tmp`, and the watcher compares the path it was given. A workspace under one
+  therefore filtered out every process and the panel sat empty with no error to explain it. The
+  process layer now matches the workspace under both names. Every unit test here used a path that
+  does not exist, where `toRealPath` fails and the configured name is the only one - which is why
+  they were green throughout; the browser test found it, because its workspace is a temp directory.
+- **Open files are listed per process, on numeric descriptors only.** `lsof -p <pid> -F fatn`, kept
+  to type `REG` with a numeric fd: a process also holds its executable, every shared library and
+  the locale files, which is a hundred rows of noise around the handful anyone means. Descriptor 1
+  or 2 pointing at a file is the row worth clicking - that is the log. A file inside the workspace
+  is opened in the tail view; one outside is named and not clickable, because the tail refuses
+  anything outside and this app serves file contents with no auth. And it can only see a descriptor
+  that stays open: a shell appending with `>>` reopens the file per line and never appears - the
+  test writer had to use `exec >>` for exactly that reason, which is the sibling note below.
 - **`lsof` would answer a different question here.** It says a file is open for writing, which is
   not the same as being written to: measured, a shell appending with `>>` reopens the file per line
   and never appears in `lsof` at all, while a long-running build does. It would add which process

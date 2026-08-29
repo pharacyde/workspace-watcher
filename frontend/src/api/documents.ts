@@ -187,6 +187,16 @@ export const FileChangedDocument = graphql(`
   }
 `);
 
+export const ProcessFilesDocument = graphql(`
+  query ProcessFiles($pid: ID!) {
+    processFiles(pid: $pid) {
+      fd
+      mode
+      path
+      relativePath
+    }
+  }
+`);
 
 export const ActivityDocument = graphql(`
   query Activity($since: String!, $until: String!, $buckets: Int!) {

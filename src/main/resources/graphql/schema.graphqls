@@ -120,6 +120,29 @@ type ProcessNode {
 }
 
 """
+A regular file a process has open, by descriptor.
+
+Numeric descriptors only: a process also holds its executable, every shared library and the locale
+files, which is a hundred rows of noise around the handful anyone means by "what does it have
+open". Descriptor 1 or 2 pointing at a file is the case worth clicking - that is the log.
+"""
+type OpenFile {
+  "The file descriptor number, as the process sees it. 1 is stdout, 2 is stderr."
+  fd: String!
+  "r, w or u, as lsof reports the access mode. Empty when it does not say."
+  mode: String!
+  "Absolute path, which is what lsof answers with."
+  path: String!
+  """
+  The same file relative to the workspace, or null when it is outside it.
+
+  Null is also the answer to "can this be opened from here": the tail takes a workspace-relative
+  path and refuses anything else, and this app serves file contents over a port with no auth.
+  """
+  relativePath: String
+}
+
+"""
 The two sides of a file, for a side-by-side diff view. A unified diff string cannot drive one:
 the editor needs both documents, not a description of their difference.
 """
@@ -340,6 +363,15 @@ type Query {
   status: Status!
   "Both sides of a file. The path is as gitStatus reports it, relative to the repository root."
   fileVersions(path: String!): FileVersions!
+
+  """
+  The regular files one process has open, newest answer each time it is asked.
+
+  Asked per process and only when someone wants it, rather than sampled: it is one `lsof -p` about
+  one process, and the answer is stale the moment it is given - which is true of the whole process
+  panel and documented as such.
+  """
+  processFiles(pid: ID!): [OpenFile!]!
   "Most recent events from the in-memory buffer, oldest first."
   recentEvents(limit: Int = 200): [WatchEvent!]!
 

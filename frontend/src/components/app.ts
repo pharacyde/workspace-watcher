@@ -22,6 +22,7 @@ export class App extends LitElement {
     hasTranscripts: { state: true },
     selected: { state: true },
     selectedEvent: { state: true },
+    selectedProcess: { state: true },
     connection: { state: true },
     search: { state: true },
     replay: { state: true },
@@ -31,6 +32,7 @@ export class App extends LitElement {
   declare private hasTranscripts: boolean;
   declare private selected: string | null;
   declare private selectedEvent: unknown | null;
+  declare private selectedProcess: unknown | null;
   declare private connection: ConnectionState;
   declare private search: string;
   declare private replay: { since: string; until: string } | null;
@@ -126,6 +128,7 @@ export class App extends LitElement {
     this.hasTranscripts = true;
     this.selected = null;
     this.selectedEvent = null;
+    this.selectedProcess = null;
     this.connection = 'connecting';
     this.search = '';
     this.replay = null;
@@ -138,9 +141,16 @@ export class App extends LitElement {
     this.addEventListener('file-selected', (event) => {
       this.selected = (event as CustomEvent<string>).detail;
       this.selectedEvent = null;
+      this.selectedProcess = null;
+    });
+    this.addEventListener('process-selected', (event) => {
+      this.selectedProcess = (event as CustomEvent<unknown>).detail;
+      this.selected = null;
+      this.selectedEvent = null;
     });
     this.addEventListener('event-selected', (event) => {
       this.selectedEvent = (event as CustomEvent<unknown>).detail;
+      this.selectedProcess = null;
       // Symmetry with the other direction: without this the working tree kept a file highlighted
       // as being viewed while the inspector showed an unrelated event.
       this.selected = null;
@@ -157,6 +167,7 @@ export class App extends LitElement {
         if (current !== null && previous !== null && current !== previous) {
           this.selected = null;
           this.selectedEvent = null;
+          this.selectedProcess = null;
           this.replay = null;
         }
         previous = current;
@@ -232,10 +243,17 @@ export class App extends LitElement {
       </header>
       <ww-timeline></ww-timeline>
       <main>
-        <ww-process-panel .search=${this.search}></ww-process-panel>
+        <ww-process-panel
+          .search=${this.search}
+          .selectedPid=${(this.selectedProcess as { pid: string } | null)?.pid ?? null}
+        ></ww-process-panel>
         <ww-feed .search=${this.search} .replay=${this.replay} .workspace=${this.active.value?.activeWorkspace ?? null}></ww-feed>
         <ww-git-panel .selected=${this.selected} .search=${this.search}></ww-git-panel>
-        <ww-diff-panel .path=${this.selected} .event=${this.selectedEvent}></ww-diff-panel>
+        <ww-diff-panel
+          .path=${this.selected}
+          .event=${this.selectedEvent}
+          .process=${this.selectedProcess}
+        ></ww-diff-panel>
       </main>
     `;
   }

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { execFile } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { appendFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -194,7 +194,11 @@ test.describe('workspace-watcher dashboard', () => {
     await page.goto('/');
   });
 
+  /** A process started inside the workspace for the process-panel test, killed with the suite. */
+  let writer: ChildProcess | undefined;
+
   test.afterAll(async () => {
+    writer?.kill('SIGKILL');
     await page?.close();
   });
 
@@ -333,6 +337,50 @@ test.describe('workspace-watcher dashboard', () => {
     }
 
     await search('');
+  });
+
+  test('clicking a process shows what it has open, and its log can be followed', async () => {
+    // The descriptor has to stay open, which is the whole reason lsof can answer here: a shell
+    // appending with `>>` per line reopens the file every time and never shows up at all. The
+    // redirect is applied once with exec, so descriptor 1 is the log for as long as it runs.
+    writer = spawn('sh', ['-c', 'exec >> held-open.log 2>&1; while :; do date; sleep 1; done'], {
+      cwd: WORKSPACE,
+      stdio: 'ignore',
+      detached: false,
+    });
+    const pid = String(writer.pid);
+
+    // The panel is a sampler on a 2s poll, so the row appears when the next poll finds it.
+    const row = page
+      .locator('ww-process-panel .rowline')
+      .filter({ has: page.locator(`.pid:text-is("${pid}")`) })
+      .first();
+    await expect(row).toBeVisible({ timeout: SCAN_TIMEOUT });
+    await row.click();
+
+    const panel = page.locator('ww-diff-panel');
+    await expect(panel.locator('h2')).toContainText('Process');
+
+    // Its own log, inside the workspace, is the row that may be clicked through.
+    const fileRow = panel.locator('.rowline.clickable').filter({ hasText: 'held-open.log' }).first();
+    await expect(fileRow).toBeVisible({ timeout: SCAN_TIMEOUT });
+    await fileRow.click();
+
+    const content = panel.locator('pre.content');
+    await expect(content).toBeVisible({ timeout: SCAN_TIMEOUT });
+    const firstRead = (await content.innerText()).length;
+    // It is a log, so it keeps arriving: the panel has to show that without being clicked again.
+    await expect
+      .poll(async () => (await content.innerText()).length, {
+        timeout: SCAN_TIMEOUT,
+        message: 'the followed log should keep growing',
+      })
+      .toBeGreaterThan(firstRead);
+
+    await panel.locator('button', { hasText: 'back to pid' }).click();
+    await expect(panel.locator('h2')).toContainText('Process');
+    writer.kill('SIGKILL');
+    writer = undefined;
   });
 
   test('an open diff keeps up with the file changing underneath it', async () => {

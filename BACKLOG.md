@@ -235,8 +235,26 @@ blijft streng, zodat een echte fout daar nog steeds de applicatie tegenhoudt. Ge
 met de oude vorm. `attributionSkill` wordt nu ook gelezen. De rest van de `attribution*`-velden
 blijft open.*
 
+**P10-16 Doorklikken van een proces naar zijn open bestanden** ✅ *(niet uit de brainstorm; gevraagd
+tijdens gebruik)*
+*Een procesregel toont de commandoregel afgekapt, en daar hield het op. Klikken opent nu het proces
+in het inspectiepaneel: volledige commandoregel, werkdirectory en `lsof -p` met alleen reguliere
+bestanden op een genummerde descriptor - `txt` en `mem` zijn honderd regels ruis rond de handvol die
+iemand bedoelt. Descriptor 1 of 2 op een bestand is precies de rij die je wil aanklikken, want daar
+staat het log; binnen de workspace opent die in de tail-weergave die blijft binnenlopen, daarbuiten
+wordt hij wel genoemd maar niet geserveerd. Bij het bouwen viel een echte bug om: lsof antwoordt met
+opgeloste paden, dus een workspace onder `/tmp` (link naar `/private/tmp`) filterde élk proces weg
+en het paneel bleef leeg zonder foutmelding. De browsertest vond het, omdat die in zo'n map draait;
+de unittests niet, omdat die met paden werken die niet bestaan.*
 
+**P10-17 In een jar of zip kijken vanuit het procesdetail** 🟢 *(gevraagd tijdens gebruik)*
+*Een proces houdt zijn eigen jar of zip open, en daar houdt het paneel nu op: de tail antwoordt
+`binary`. Erin kunnen kijken zoals in een map - de entries, en doorklikken naar wat erin zit.*
 
+**P10-18 Het actieve paneel groter maken, als in een tiling window manager** 🟡
+*(gevraagd tijdens gebruik)*
+*Eén toets die het paneel waar je naar kijkt het hele venster laat innemen, en weer terug. Vraagt
+wel een begrip van focus, dat er nu niet is - selectie is iets anders.*
 
 **P10-15 Bestandsinhoud en live logs in het inspectiepaneel** ✅
 *Een bestand kiezen in de activity toonde tot nu alleen het event-record; de inhoud kwam er nooit in.

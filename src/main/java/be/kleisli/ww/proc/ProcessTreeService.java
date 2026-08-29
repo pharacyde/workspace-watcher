@@ -34,6 +34,17 @@ public class ProcessTreeService {
 
   public record Node(long pid, String command, String cwd, List<Node> children) {}
 
+  /**
+   * A file a process is holding open.
+   *
+   * <p>{@code relativePath} is set only for a file inside the workspace, and it is what makes the
+   * row clickable: the tail subscription takes a workspace-relative path and refuses anything
+   * outside, which is the same rule the rest of this app is served under. A file elsewhere is
+   * listed with its absolute path and nothing else, because saying it is there is honest and
+   * serving its contents over a port would not be.
+   */
+  public record OpenFile(String fd, String mode, String path, String relativePath) {}
+
   /** Wrapper so the subscription has a single named type to return. */
   public record Snapshot(String at, int total, List<Node> roots) {}
 
@@ -79,6 +90,122 @@ public class ProcessTreeService {
     stream.publish(new Snapshot(Instant.now().toString(), count(tree), tree));
   }
 
+  /**
+   * The regular files one process currently has open.
+   *
+   * <p>Asked per process and only when someone clicks, rather than sampled: {@code lsof -p} is one
+   * call about one process, and the answer is only interesting while a panel is showing it.
+   *
+   * <p>Numeric descriptors only. A process holds its executable, every shared library and the
+   * locale files open as well - {@code txt} and {@code mem} - which is a hundred rows of noise
+   * around the handful anyone means by "what does it have open". Descriptor 1 or 2 pointing at a
+   * file is exactly the case worth clicking: that is where the log is being written.
+   */
+  public List<OpenFile> openFiles(long pid) {
+    // Only a process this panel is already showing. Without the check, anything that can reach the
+    // port could walk pids 1..N and read the paths of every file every process on the machine has
+    // open - a browser profile, a password store. This app is loopback-only and unauthenticated,
+    // and invariant 4 puts source diffs and command lines in that trade, not the whole machine.
+    if (!isWatched(pid, currentSnapshot().roots())) {
+      return List.of();
+    }
+    // Bounded like every other shell-out here. lsof can block on a stale network mount, and a
+    // dashboard query is not allowed to hang because of one.
+    Shell.Result result =
+        Shell.run(null, List.of("lsof", "-p", String.valueOf(pid), "-F", "fatn"), 5);
+    return parseOpenFiles(result.lines(), active.get());
+  }
+
+  /** Whether a pid appears anywhere in the tree that was last published. */
+  static boolean isWatched(long pid, List<Node> nodes) {
+    return nodes.stream().anyMatch(node -> node.pid() == pid || isWatched(pid, node.children()));
+  }
+
+  /** Package-private so the parsing can be tested without running lsof. */
+  static List<OpenFile> parseOpenFiles(List<String> lines, Path workspace) {
+    List<String> prefixes = prefixesFor(workspace);
+    List<OpenFile> files = new ArrayList<>();
+    String fd = null;
+    String mode = null;
+    String type = null;
+    for (String line : lines) {
+      if (line.isEmpty()) {
+        continue;
+      }
+      char field = line.charAt(0);
+      String value = line.substring(1);
+      switch (field) {
+        case 'f' -> {
+          // A new descriptor begins; whatever was collected for the previous one is complete.
+          fd = value;
+          mode = null;
+          type = null;
+        }
+        case 'a' -> mode = value;
+        case 't' -> type = value;
+        case 'n' -> {
+          if (fd != null && "REG".equals(type) && fd.chars().allMatch(Character::isDigit)) {
+            files.add(
+                new OpenFile(
+                    fd,
+                    // lsof writes a space when it cannot tell the access mode; that is "unknown",
+                    // and rendering it as a character shifted the column by one.
+                    mode == null ? "" : mode.trim(),
+                    value,
+                    relativeTo(prefixes, value)));
+          }
+          fd = null;
+        }
+        default -> {
+          // p (the process), and everything else lsof volunteers, is not part of a file record.
+        }
+      }
+    }
+    return List.copyOf(files);
+  }
+
+  /**
+   * The path relative to the workspace, or null when the file is not in it.
+   *
+   * <p>The boundary matters: a bare startsWith makes /Users/me/Dev2 a file of /Users/me/Dev, which
+   * is the same bug this project has already had twice.
+   */
+  private static String relativeTo(List<String> prefixes, String path) {
+    for (String prefix : prefixes) {
+      if (path.startsWith(prefix + "/")) {
+        return path.substring(prefix.length() + 1);
+      }
+    }
+    return null;
+  }
+
+  /** Whether a path lsof reported sits inside the workspace, under any of its names. */
+  private static boolean inside(String path, List<String> prefixes) {
+    return prefixes.stream().anyMatch(p -> path.equals(p) || path.startsWith(p + "/"));
+  }
+
+  /**
+   * The names the workspace answers to: as configured, and as the filesystem really spells it.
+   *
+   * <p>lsof reports resolved paths, and a workspace reached through a symlink is not spelled the
+   * same way - on macOS /tmp is a link to /private/tmp, so a workspace under it matched nothing at
+   * all and this panel sat empty with no error to explain it. Found by the browser test, which runs
+   * in exactly such a directory; every unit test here uses a path that does not exist, where
+   * toRealPath fails and the configured name is the only one, which is why they never saw it.
+   */
+  private static List<String> prefixesFor(Path workspace) {
+    if (workspace == null) {
+      return List.of();
+    }
+    String configured = workspace.toString();
+    try {
+      String real = workspace.toRealPath().toString();
+      return real.equals(configured) ? List.of(configured) : List.of(configured, real);
+    } catch (java.io.IOException | RuntimeException e) {
+      return List.of(configured);
+    }
+  }
+
   /** One {@code lsof} call for all processes, filtered to the workspace subtree. */
   private Map<Long, String> processesWithCwdIn(Path workspace) {
     Shell.Result result = Shell.run(null, List.of("lsof", "-a", "-d", "cwd", "-F", "pn"), 20);
@@ -93,7 +220,7 @@ public class ProcessTreeService {
   static Map<Long, String> parseCwdLines(List<String> lines, Path workspace) {
     Map<Long, String> matched = new LinkedHashMap<>();
     Long pid = null;
-    String prefix = workspace.toString();
+    List<String> prefixes = prefixesFor(workspace);
     for (String line : lines) {
       if (line.isEmpty()) {
         continue;
@@ -103,7 +230,7 @@ public class ProcessTreeService {
       if (field == 'p') {
         pid = parse(value);
       } else if (field == 'n' && pid != null) {
-        if (value.equals(prefix) || value.startsWith(prefix + "/")) {
+        if (inside(value, prefixes)) {
           matched.put(pid, value);
         }
         pid = null;

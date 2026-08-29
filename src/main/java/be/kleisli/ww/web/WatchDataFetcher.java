@@ -168,6 +168,16 @@ public class WatchDataFetcher {
     return mapper.toSessions(sessions.current());
   }
 
+  /** The regular files a process has open, for the panel to list and click through. */
+  @DgsQuery
+  public List<be.kleisli.ww.generated.types.OpenFile> processFiles(@InputArgument String pid) {
+    try {
+      return mapper.toOpenFiles(processes.openFiles(Long.parseLong(pid)));
+    } catch (NumberFormatException e) {
+      // An id that is not a pid is a client bug, not a server error worth failing the query over.
+      return List.of();
+    }
+  }
 
   /** Activity density over a range, for a timeline to draw. */
   @DgsQuery
