@@ -247,6 +247,13 @@ opgeloste paden, dus een workspace onder `/tmp` (link naar `/private/tmp`) filte
 en het paneel bleef leeg zonder foutmelding. De browsertest vond het, omdat die in zo'n map draait;
 de unittests niet, omdat die met paden werken die niet bestaan.*
 
+**P10-19 De feed stopt af en toe met volgen bij wrap aan** 🟡 *(gevonden door de browsertest)*
+*Eén op de negen runs blijft de feed 391 px van het einde staan met volgen aan, en komt daar in
+dertig seconden niet meer weg - dus er komt geen `rangeChanged` meer waarop opnieuw vastgezet kan
+worden. Zelfde familie als de bug die er al zit: de virtualizer meet zijn rijen asynchroon en de
+hoogte groeit in stappen. Reproduceerbaar met de suite in een lus; `toggling wrap does not break
+following` is de test die valt.*
+
 **P10-17 In een jar of zip kijken vanuit het procesdetail** 🟢 *(gevraagd tijdens gebruik)*
 *Een proces houdt zijn eigen jar of zip open, en daar houdt het paneel nu op: de tail antwoordt
 `binary`. Erin kunnen kijken zoals in een map - de entries, en doorklikken naar wat erin zit.*
