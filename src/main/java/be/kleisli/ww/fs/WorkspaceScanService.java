@@ -175,6 +175,9 @@ public class WorkspaceScanService {
     previous = current;
     int total = created.size() + modified.size() + deleted.size();
     if (total == 0) {
+      // Nothing in the tree moved, but git itself may have: a commit leaves every file exactly as
+      // it was, and without this the working tree panel kept listing what had just been committed.
+      git.refreshIfGitChanged();
       return;
     }
 

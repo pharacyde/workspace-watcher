@@ -55,6 +55,36 @@ class GitServiceTest {
   }
 
   @Test
+  @DisplayName("a commit refreshes the working tree even though no file changed")
+  void refreshesAfterACommitWithoutFileChanges() throws IOException {
+    Files.writeString(module.resolve("src/App.java"), "class App { int x; }\n");
+    GitService service = serviceWatching(repo);
+    assertThat(service.current().files()).hasSize(1);
+
+    // The scanner only refreshes when it saw a file change, and committing changes no file: every
+    // mtime and size in the tree is what it was a moment earlier. Without a second signal the panel
+    // kept listing what had just been committed, and clicking one of those rows opened a diff with
+    // nothing in it.
+    git("add", ".");
+    git("commit", "-m", "second");
+
+    service.refreshIfGitChanged();
+    assertThat(service.current().files()).isEmpty();
+    assertThat(service.current().headSubject()).isEqualTo("second");
+  }
+
+  @Test
+  @DisplayName("nothing happening in git costs nothing and changes nothing")
+  void quietRepositoryIsNotRefreshed() {
+    GitService service = serviceWatching(repo);
+    GitService.Snapshot before = service.current();
+
+    service.refreshIfGitChanged();
+
+    assertThat(service.current()).isSameAs(before);
+  }
+
+  @Test
   @DisplayName("reads branch and changed files at the repository root")
   void readsStatusAtRoot() throws IOException {
     Files.writeString(module.resolve("src/App.java"), "class App { int x; }\n");

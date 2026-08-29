@@ -396,6 +396,13 @@ not need paying for twice.
 - **Recording must never slow a collector.** `EventStore` queues and flushes on a scheduler, and
   drops the newest events if the queue fills rather than blocking. It also subscribes to the bus
   instead of the bus knowing about it, so storage stays invisible to the thing being stored.
+- **A commit changes nothing the scanner can see.** `git.refresh()` used to run only on a scan that
+  found a changed file, and a commit, checkout, stash or branch switch leaves every size and mtime
+  in the tree exactly as it was - so the working tree panel went on listing what had just been
+  committed, indefinitely, and clicking one of those rows opened a diff with nothing in it. It
+  survives a page reload, because the stale snapshot is the server's. A quiet scan now stamps the
+  index and HEAD (size and mtime) and refreshes when those moved: two stat calls, against a `git
+  status` per scan, which on a large repository is the expensive call this gating exists to avoid.
 - **A file may not belong to the repository being watched.** Submodules are separate repositories;
   `git show HEAD:<path>` from the superproject fails for anything inside one. `versions()` asks
   whichever repository actually tracks the file.

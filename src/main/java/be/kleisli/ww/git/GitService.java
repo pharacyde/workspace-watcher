@@ -61,11 +61,73 @@ public class GitService {
 
   /** Recomputes the working tree and broadcasts it only when something actually changed. */
   public synchronized void refresh() {
+    gitStamp = gitStamp();
     Snapshot snapshot = read();
     if (snapshot.equals(stream.current())) {
       return;
     }
     stream.publish(snapshot);
+  }
+
+  /**
+   * Refreshes when git's own state moved without any watched file moving.
+   *
+   * <p>A commit, a checkout, a stash or a branch switch rewrites the index and HEAD and leaves
+   * every file in the tree exactly as it was, so the scanner sees nothing to report and the panel
+   * kept describing the working tree from before the commit - for as long as nobody touched a file
+   * afterwards, and a page reload does not help because the stale snapshot is the server's.
+   *
+   * <p>Two stat calls rather than a {@code git status} on every scan: that command is the expensive
+   * one on a large repository, which is exactly why the scan does not simply always refresh.
+   */
+  public synchronized void refreshIfGitChanged() {
+    String stamp = gitStamp();
+    if (stamp == null || stamp.equals(gitStamp)) {
+      return;
+    }
+    refresh();
+  }
+
+  /** Last seen state of git's own files; null until the first {@link #refresh()}. */
+  private String gitStamp;
+
+  /**
+   * The index and HEAD, by size and modification time.
+   *
+   * <p>Those two are what {@code git status} reads besides the tree itself: the index changes on a
+   * commit, an add and a stash, HEAD on a checkout or a branch switch. Size as well as time,
+   * because two commits inside one filesystem timestamp are not exotic on a coarse filesystem.
+   */
+  private String gitStamp() {
+    Path repoRoot = root;
+    if (repoRoot == null) {
+      return null;
+    }
+    Path gitDir = repoRoot.resolve(".git");
+    try {
+      // In a linked worktree .git is a file naming the real directory, which is where the index
+      // for that worktree lives; stamping the file itself would never change.
+      if (Files.isRegularFile(gitDir)) {
+        String pointer = Files.readString(gitDir, StandardCharsets.UTF_8).strip();
+        if (!pointer.startsWith("gitdir:")) {
+          return null;
+        }
+        gitDir = repoRoot.resolve(pointer.substring("gitdir:".length()).strip()).normalize();
+      }
+      return stampOf(gitDir.resolve("index")) + "/" + stampOf(gitDir.resolve("HEAD"));
+    } catch (IOException | RuntimeException e) {
+      // Fail quiet: this is an optimisation over refreshing, and a repository we cannot stat is
+      // one the refresh below will describe just as well.
+      log.debug("cannot stamp git state at {}", gitDir, e);
+      return null;
+    }
+  }
+
+  private static String stampOf(Path file) throws IOException {
+    if (!Files.exists(file)) {
+      return "-";
+    }
+    return Files.size(file) + "@" + Files.getLastModifiedTime(file).toMillis();
   }
 
   /**

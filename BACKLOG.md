@@ -269,6 +269,14 @@ De naam van de app niet voluit, want een tab toont een karakter of tien en die h
 te gaan; en geen logo in de tekst, want de tab tekent het oog er als icoon al pal naast. `src/title.ts` stelt de titel samen, want de badge met gemiste gebeurtenissen schrijft er
 ook in en wie als tweede `document.title` zet wist de helft van de ander.*
 
+**P10-21 Het working tree paneel bleef plakken na een commit** ✅ *(gemeld tijdens gebruik)*
+*Na een commit bleef het paneel de bestanden tonen die net gecommit waren, en een klik erop opende
+een lege diff. De scanner ververst git alleen als hij een bestand zag veranderen, en een commit
+verandert geen enkel bestand - elke grootte en mtime in de boom is wat ze was. Een pagina herladen
+hielp niet, want het verouderde beeld zit aan de serverkant. Een stille scan stempelt nu de index
+en HEAD (grootte en mtime) en ververst als die bewogen: twee stat-calls, tegenover een `git status`
+per scan, wat op een grote repository juist de dure oproep is waarvoor die poort er staat.*
+
 **P10-17 In een jar of zip kijken vanuit het procesdetail** 🟢 *(gevraagd tijdens gebruik)*
 *Een proces houdt zijn eigen jar of zip open, en daar houdt het paneel nu op: de tail antwoordt
 `binary`. Erin kunnen kijken zoals in een map - de entries, en doorklikken naar wat erin zit.*
