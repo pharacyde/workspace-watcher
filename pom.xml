@@ -30,6 +30,7 @@
     <json-path.version>3.0.0</json-path.version>
     <sqlite-jdbc.version>3.53.4.0</sqlite-jdbc.version>
     <frontend-maven-plugin.version>2.0.2</frontend-maven-plugin.version>
+    <maven-clean-plugin.version>3.5.0</maven-clean-plugin.version>
     <node.version>v22.15.0</node.version>
     <!-- mvn package -DskipFrontend to build the backend alone. -->
     <skipFrontend>false</skipFrontend>
@@ -143,6 +144,36 @@
         release needs no node at all. node itself is downloaded per project rather than taken from
         the machine, which keeps a contributor's build identical to CI.
       -->
+      <!--
+        Vite empties src/main/resources/static on every build, but Maven only ever copies into
+        target/classes: a file that disappeared from the source stays there. Asset names carry a
+        content hash, so every rebuild left another complete bundle behind and the jar shipped all
+        of them - measured at 1294 asset files for the 30 that belong, and 97 MB. Removing the
+        copy at the start of the build means the resources step re-copies exactly what exists now.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-clean-plugin</artifactId>
+        <version>${maven-clean-plugin.version}</version>
+        <executions>
+          <execution>
+            <id>remove-stale-bundles</id>
+            <phase>initialize</phase>
+            <goals>
+              <goal>clean</goal>
+            </goals>
+            <configuration>
+              <!-- Only the copied static directory; `mvn clean` itself still does the usual. -->
+              <excludeDefaultDirectories>true</excludeDefaultDirectories>
+              <filesets>
+                <fileset>
+                  <directory>${project.build.outputDirectory}/static</directory>
+                </fileset>
+              </filesets>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
       <plugin>
         <groupId>com.github.eirslett</groupId>
         <artifactId>frontend-maven-plugin</artifactId>

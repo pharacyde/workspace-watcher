@@ -29,6 +29,11 @@ Note Spring Boot 4 ships **Jackson 3**: the package is `tools.jackson.databind`,
 `com.fasterxml.jackson.databind`. `asText()` and `isTextual()` are deprecated in favour of
 `asString()` and `isString()`, and parse failures are unchecked exceptions.
 
+`target/classes/static` is emptied at the start of every build. Vite empties the *source* static
+directory, but Maven only ever copies into `target/classes`, so a bundle that disappeared from the
+source stayed there and was packaged forever after: measured at 1294 asset files for the 30 that
+belong, and a 97 MB jar that is 52 MB once they are gone.
+
 Run it from a **copy** of the jar, not from `target/` itself. A Spring Boot fat jar is read lazily
 - nested jars stay compressed until a class is first needed - so rebuilding while the app runs
 pulls the file out from under the running JVM. It does not fail at once: the pages already served
