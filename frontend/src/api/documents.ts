@@ -144,6 +144,19 @@ export const UsageDocument = graphql(`
       last7d {
         total
       }
+      limits {
+        fetchedAt
+        windows {
+          kind
+          group
+          percent
+          severity
+          resetsAt
+          scope
+          active
+          expired
+        }
+      }
       tokens {
         input
         output
@@ -162,6 +175,8 @@ export const UsageDocument = graphql(`
     }
   }
 `);
+
+
 
 export const ActivityDocument = graphql(`
   query Activity($since: String!, $until: String!, $buckets: Int!) {

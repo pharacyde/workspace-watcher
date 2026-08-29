@@ -260,12 +260,61 @@ type UsageSummary {
   """
   Tokens used across the workspace in the last five hours and seven days.
 
-  This is the shape a subscription's limits take, and it is consumption rather than headroom: how
-  much of an allowance remains is not recorded anywhere locally. Claude Code's own /usage command
-  fetches that live with the account credential.
+  This is the shape a subscription's limits take, counted from the transcripts of this workspace
+  alone. It answers a different question than limits below, which is the account's whole
+  consumption as Claude Code last fetched it.
   """
   last5h: TokenUsage!
   last7d: TokenUsage!
+
+  """
+  How much of the account's subscription limits is used, or null when nothing is recorded locally.
+
+  Read from the cache Claude Code keeps in ~/.claude.json. It is what was true at fetchedAt, so it
+  is reported with that moment attached rather than as the standing right now.
+  """
+  limits: LimitSnapshot
+}
+
+"One limit window as Claude Code last saw it."
+type LimitWindow {
+  "Claude Code's own name for the window: session, weekly_all, weekly_scoped."
+  kind: String!
+  "The window's group, e.g. weekly - two windows may share one."
+  group: String!
+  """
+  Percentage of the window that is used.
+
+  A percentage and not an amount: limit_dollars is null on a subscription, which is what being on
+  a subscription means.
+  """
+  percent: Float!
+  "normal, warning or locked, as reported."
+  severity: String!
+  "When this window rolls over, ISO-8601. Null when the window has no reset moment."
+  resetsAt: String
+  "The model a scoped window applies to, e.g. Fable. Null for an unscoped window."
+  scope: String
+  "Whether Claude Code considers this the window currently binding."
+  active: Boolean!
+  """
+  True when resetsAt has passed, so the percentage describes a window that has since rolled over.
+
+  Measured here: a five-hour window cached at 7% whose reset moment lay fourteen hours in the past.
+  Showing that as the current standing would be a confident lie about headroom.
+  """
+  expired: Boolean!
+}
+
+type LimitSnapshot {
+  """
+  When Claude Code fetched these figures, ISO-8601. Shown, so an old number announces itself.
+
+  Null when the cache does not say. Reporting the epoch there would be an invented fact, and this
+  figure is only honest with its age attached.
+  """
+  fetchedAt: String
+  windows: [LimitWindow!]!
 }
 
 type Status {

@@ -182,7 +182,7 @@ LTS the build targets and the minimum the README promises — and runs the tests
 because that is the platform the process layer is written against and a green Linux build says
 less here than it usually would. Standard runners are free on public repositories.
 
-`mvn test`. 142 tests, deliberately aimed at the parsers and at the failure modes this project has
+`mvn test`. 150 tests, deliberately aimed at the parsers and at the failure modes this project has
 actually hit rather than at a coverage number. `GitServiceTest.resolvesVersionsFromASubdirectoryWorkspace`
 is the regression test for the worst bug so far and should not be deleted.
 
@@ -297,9 +297,16 @@ not need paying for twice.
 - **Sample resources before comparing the process tree.** A steady build keeps the same processes
   for minutes, which is exactly when CPU is worth looking at; behind the equality check the series
   stayed empty during the only periods anyone would examine it.
-- **Consumption against subscription limits is not knowable locally.** Claude Code keeps no record
-  of it; its own `/usage` fetches it live with the account credential. Rolling-window token totals
-  are the honest local approximation. Do not reach for that credential to fill the gap.
+- **Consumption against subscription limits is knowable locally, as a cache.** This file used to
+  say it was not, and re-measuring is what found it: Claude Code writes what its own `/usage`
+  fetched into `cachedUsageUtilization` in `~/.claude.json` - the file `Billing` already opens -
+  with a percent and an exact `resets_at` per window, plus a `limits[]` array. Measured here: 7% of
+  the five-hour window, 49% of the seven-day one. `limit_dollars` is null on a subscription, so
+  percentages are the only honest form. Two things keep it honest: `fetchedAt` is shown, so an old
+  number announces itself (15h old on the first run), and a window whose `resets_at` has passed is
+  marked as rolled over instead of being presented as where you stand now - the five-hour figure
+  was already fourteen hours stale when it was read. Still do not reach for the account credential
+  to fetch a fresh figure; read the file that is there anyway.
 - **`metric` needs a row cap, not only an age limit.** Resource samples are written on a schedule
   rather than when something changes - deliberately, so a steady build still produces a series - so
   the table grows whether anything happens or not: 2833 rows in 2h44m, roughly 740k a month on an

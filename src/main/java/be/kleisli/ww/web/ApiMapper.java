@@ -11,6 +11,8 @@ import be.kleisli.ww.generated.types.GuardConfig;
 import be.kleisli.ww.generated.types.GuardDecision;
 import be.kleisli.ww.generated.types.GuardRule;
 import be.kleisli.ww.generated.types.GuardRuleKind;
+import be.kleisli.ww.generated.types.LimitSnapshot;
+import be.kleisli.ww.generated.types.LimitWindow;
 import be.kleisli.ww.generated.types.ModelUsage;
 import be.kleisli.ww.generated.types.ProcessNode;
 import be.kleisli.ww.generated.types.ProcessSnapshot;
@@ -22,6 +24,7 @@ import be.kleisli.ww.git.GitService;
 import be.kleisli.ww.guard.GuardService;
 import be.kleisli.ww.proc.ProcessTreeService;
 import be.kleisli.ww.store.EventStore;
+import be.kleisli.ww.usage.AccountLimits;
 import be.kleisli.ww.usage.UsageService;
 import java.util.List;
 import org.springframework.stereotype.Component;
@@ -172,7 +175,9 @@ public class ApiMapper {
         .toList();
   }
 
-  public UsageSummary toUsage(UsageService.Summary summary) {
+
+
+  public UsageSummary toUsage(UsageService.Summary summary, AccountLimits.Snapshot limits) {
     return UsageSummary.newBuilder()
         .models(
             summary.models().stream()
@@ -192,6 +197,33 @@ public class ApiMapper {
         .plan(summary.plan())
         .last5h(toTokens(summary.last5h()))
         .last7d(toTokens(summary.last7d()))
+        .limits(toLimits(limits))
+        .build();
+  }
+
+  private LimitSnapshot toLimits(AccountLimits.Snapshot limits) {
+    // Null rather than an empty snapshot: a machine with no cached figure has not told us the
+    // limits are zero, and the difference is the whole point of invariant 2.
+    if (limits == null) {
+      return null;
+    }
+    return LimitSnapshot.newBuilder()
+        .fetchedAt(limits.fetchedAt())
+        .windows(
+            limits.windows().stream()
+                .map(
+                    w ->
+                        LimitWindow.newBuilder()
+                            .kind(w.kind())
+                            .group(w.group())
+                            .percent(w.percent())
+                            .severity(w.severity())
+                            .resetsAt(w.resetsAt())
+                            .scope(w.scope())
+                            .active(w.active())
+                            .expired(w.expired())
+                            .build())
+                .toList())
         .build();
   }
 

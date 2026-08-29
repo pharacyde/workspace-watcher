@@ -22,6 +22,7 @@ import be.kleisli.ww.git.GitService;
 import be.kleisli.ww.guard.GuardService;
 import be.kleisli.ww.proc.ProcessTreeService;
 import be.kleisli.ww.store.EventStore;
+import be.kleisli.ww.usage.AccountLimits;
 import be.kleisli.ww.usage.UsageService;
 import com.netflix.graphql.dgs.DgsComponent;
 import com.netflix.graphql.dgs.DgsMutation;
@@ -59,6 +60,7 @@ public class WatchDataFetcher {
   private final EventStore store;
   private final GuardService guard;
   private final UsageService usage;
+  private final AccountLimits limits;
   private final EventBus eventBus;
   private final GitService git;
   private final FileTailService fileTail;
@@ -75,6 +77,7 @@ public class WatchDataFetcher {
       EventStore store,
       GuardService guard,
       UsageService usage,
+      AccountLimits limits,
       EventBus eventBus,
       GitService git,
       ProcessTreeService processes,
@@ -89,6 +92,7 @@ public class WatchDataFetcher {
     this.store = store;
     this.guard = guard;
     this.usage = usage;
+    this.limits = limits;
     this.eventBus = eventBus;
     this.git = git;
     this.fileTail = fileTail;
@@ -160,6 +164,7 @@ public class WatchDataFetcher {
     return mapper.toSessions(sessions.current());
   }
 
+
   /** Activity density over a range, for a timeline to draw. */
   @DgsQuery
   public List<be.kleisli.ww.generated.types.ActivityBucket> activity(
@@ -174,7 +179,7 @@ public class WatchDataFetcher {
   /** Tokens and cost for one session, or the whole workspace when sessionId is omitted. */
   @DgsQuery
   public UsageSummary usage(@InputArgument String sessionId) {
-    return mapper.toUsage(usage.summarise(sessionId));
+    return mapper.toUsage(usage.summarise(sessionId), limits.current());
   }
 
   /** Token use over a range, bucketed for a timeline. */

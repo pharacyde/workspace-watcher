@@ -57,6 +57,15 @@ public class WatcherProperties {
   private String spool = System.getProperty("user.home") + "/.claude/workspace-watcher-spool";
 
   /**
+   * Claude Code's own config file, read for the billing mode and the cached limit usage.
+   *
+   * <p>A property rather than a constant so a test run can be pointed elsewhere: the browser suite
+   * takes pains to keep away from the developer's real ~/.claude, and this read walked around all
+   * of it and rendered their actual subscription usage into the test dashboard.
+   */
+  private String claudeConfig = System.getProperty("user.home") + "/.claude.json";
+
+  /**
    * How many agent sessions are offered for a workspace.
    *
    * <p>A long-running project accumulates hundreds - a real one here has 333 - and a list that long
@@ -188,6 +197,18 @@ public class WatcherProperties {
 
   public void setTranscriptPollMs(long transcriptPollMs) {
     this.transcriptPollMs = transcriptPollMs;
+  }
+
+  public Path claudeConfigPath() {
+    return Paths.get(claudeConfig).toAbsolutePath().normalize();
+  }
+
+  public String getClaudeConfig() {
+    return claudeConfig;
+  }
+
+  public void setClaudeConfig(String claudeConfig) {
+    this.claudeConfig = claudeConfig;
   }
 
   public String getSpool() {

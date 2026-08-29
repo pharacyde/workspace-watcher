@@ -31,14 +31,15 @@ public class Billing {
   private final String plan;
 
   public Billing(WatcherProperties props) {
+    Path config = props.claudeConfigPath();
     String configured = props.getBilling() == null ? "auto" : props.getBilling().toLowerCase();
     this.mode =
         switch (configured) {
           case "api", "subscription" -> configured;
-          default -> detect();
+          default -> detect(config);
         };
     this.billedPerToken = "api".equals(mode);
-    this.plan = readPlan();
+    this.plan = readPlan(config);
     log.info(
         "billing is {} ({}), so cost is {}",
         mode,
@@ -58,17 +59,16 @@ public class Billing {
   /**
    * The subscription tier, when one is recorded locally.
    *
-   * <p>Only the plan is knowable from here. How much of it has been used is not: Claude Code keeps
-   * no local record of consumption against the limits, and the figure its own {@code /usage}
-   * command shows is fetched live with the account's OAuth credential. Reaching for that credential
-   * to fill in a number is exactly the kind of thing this project's guard exists to stop.
+   * <p>Only the plan comes from here. How much of it has been used is read from the same file by
+   * {@link AccountLimits}, which takes the answer Claude Code's own {@code /usage} already fetched
+   * and cached. Reaching for the OAuth credential to fetch a fresher one is still exactly the kind
+   * of thing this project's guard exists to stop.
    */
   public String plan() {
     return plan;
   }
 
-  private static String readPlan() {
-    Path config = Path.of(System.getProperty("user.home"), ".claude.json");
+  private static String readPlan(Path config) {
     try {
       if (!Files.isRegularFile(config)) {
         return null;
@@ -87,12 +87,11 @@ public class Billing {
     }
   }
 
-  private static String detect() {
+  private static String detect(Path config) {
     String key = System.getenv("ANTHROPIC_API_KEY");
     if (key != null && !key.isBlank()) {
       return "api";
     }
-    Path config = Path.of(System.getProperty("user.home"), ".claude.json");
     try {
       if (Files.isRegularFile(config)
           && Files.readString(config, StandardCharsets.UTF_8).contains("\"oauthAccount\"")) {

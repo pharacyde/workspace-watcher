@@ -88,6 +88,7 @@ percentage and megabytes share no axis worth drawing.
 No GPU or Neural Engine, and not for want of trying: `powermetrics` refuses to run without root, and
 even with it reports system-wide figures rather than per-process ones.
 
+
 Older text, kept for the shape of the argument: They look
 alike and are not — a hundred file events and one enormous prompt are indistinguishable in a count
 of events, and nothing alike in what they cost. Each series draws two densities rather than one: Click a slice to scrub back into it; the activity panel becomes a replay of that moment,
@@ -229,8 +230,11 @@ seventh of the real figure, confidently.
 fee and usage limits — so the amount is prefixed with `≈` and labelled *what these tokens would
 cost at API rates*. Detected from the local config; override with `watcher.billing`. The panel also
 shows tokens used in the last five hours and seven days, which is the shape those limits take.
-How much of an allowance *remains* is not shown, because it is not knowable from this machine:
-Claude Code keeps no local record and fetches it live with the account credential.
+How much of the allowance is *used* comes from Claude Code's own cache in `~/.claude.json`, shown
+as a percent per window with the moment it resets — nothing here is guessed and the account
+credential is never touched. It is a cache, so it is labelled with when Claude Code fetched it, and
+a window whose reset moment has passed is marked as such rather than presented as where you stand
+now.
 
 What cannot be priced is named rather than hidden: a model with no entry — a locally run one, say —
 is listed as not counted, and everything else is still added up. Voiding the whole figure over one

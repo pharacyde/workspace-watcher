@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -37,6 +37,40 @@ process.env.WW_E2E_ROOT = root;
 
 const workspace = join(root, 'workspace');
 const claudeHome = join(root, 'claude');
+// A fixture for the usage header: a five-hour window that has rolled over and a live weekly one,
+// which is the shape the real file has and the one the panel has to describe honestly.
+if (!existsSync(join(root, 'claude.json'))) {
+  writeFileSync(
+    join(root, 'claude.json'),
+    JSON.stringify({
+      oauthAccount: { organizationRateLimitTier: 'e2e_fixture' },
+      cachedUsageUtilization: {
+        fetchedAtMs: Date.now() - 3_600_000,
+        utilization: {
+          limits: [
+            {
+              kind: 'session',
+              group: 'session',
+              percent: 7,
+              severity: 'normal',
+              resets_at: new Date(Date.now() - 3_600_000).toISOString(),
+              is_active: false,
+            },
+            {
+              kind: 'weekly_all',
+              group: 'weekly',
+              percent: 49,
+              severity: 'normal',
+              resets_at: new Date(Date.now() + 86_400_000).toISOString(),
+              is_active: true,
+            },
+          ],
+        },
+      },
+    }),
+  );
+}
+
 for (const dir of [workspace, join(claudeHome, 'projects'), join(root, 'state')]) {
   mkdirSync(dir, { recursive: true });
 }
@@ -162,6 +196,10 @@ export default defineConfig({
       // register is filled from the spool, not from claude-home, so this is also what actually
       // keeps a real project from being adopted mid-test.
       `--watcher.spool=${join(root, 'spool')}`,
+      // Same reason, one file over: the billing mode and the cached limit usage are read from
+      // ~/.claude.json, which is not under claude-home either. Pointed at a fixture so the suite
+      // renders known numbers instead of the developer's actual subscription usage.
+      `--watcher.claude-config=${join(root, 'claude.json')}`,
     ]
       .map((part) => `"${part}"`)
       .join(' '),

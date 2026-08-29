@@ -200,7 +200,7 @@ een andere laan dan zijn eigen resultaat. Subagent-transcripts worden nooit opge
 machine), dus alleen bestanden die in de laatste twee uur geschreven zijn worden gevolgd: een agent
 die al uren stil ligt, is klaar. Geverifieerd tegen een echt transcript van 24 MB.*
 
-**P10-01 Resterend limietverbruik uit `~/.claude.json`** 🟢
+**P10-01 Resterend limietverbruik uit `~/.claude.json`** ✅
 *De header zegt wat er is uitgegeven en zwijgt over wat er nog over is, omdat CLAUDE.md vaststelt dat
 dat lokaal niet kenbaar is. Dat klopt niet: `cachedUsageUtilization` bevat `utilization.five_hour` en
 `.seven_day` met een percentage en een exact `resets_at`, plus een `limits[]`-array en de
@@ -210,6 +210,16 @@ Twee eerlijkheidseisen: toon `fetchedAtMs`, zodat een oud cijfer zichzelf als ou
 percentages — `limit_dollars` is `null` op een abonnement. De regel in CLAUDE.md moet herschreven
 worden, niet stilzwijgend overtreden. Het principe blijft heel: er wordt niets geraden en de
 accountcredential blijft onaangeroerd; er wordt een bestand gelezen dat er toch al is.*
+
+*Gedaan. `AccountLimits` leest `cachedUsageUtilization` en levert per venster een percentage, een
+`resets_at`, de severity en de scope; de header toont het volste nog lopende venster (49% 7d) en het
+paneel alle drie met een balk. Bij het meten kwam er één ding bij dat hierboven niet staat: het
+gecachte vijfuursvenster stond op 7% terwijl zijn resetmoment veertien uur in het verleden lag — dat
+cijfer als "waar je nu staat" tonen zou precies de zelfverzekerde leugen zijn waar dit project tegen
+gebouwd is, dus een verlopen venster wordt als verlopen gemarkeerd en telt niet mee voor de pill.
+Die verval-berekening gebeurt óók bij een cache-hit: het bestand verandert niet, de klok wel.
+Gelezen wordt de `limits[]`-array, met terugval op de losse `five_hour`/`seven_day`-velden voor een
+oudere vorm. De regel in CLAUDE.md is herschreven in plaats van stilzwijgend overtreden.*
 
 **P10-11 Attributie gaat verloren bij opslag** ✅ (opslag) / 🟢 (attribution*-velden)
 *De tabel `event` heeft geen kolommen voor `mcp_server` en `subagent`, dus `ApiMapper.toEvent(Stored)`
@@ -224,6 +234,9 @@ die met foutentolerantie draait omdat SQLite geen `ADD COLUMN IF NOT EXISTS` ken
 blijft streng, zodat een echte fout daar nog steeds de applicatie tegenhoudt. Getest op een database
 met de oude vorm. `attributionSkill` wordt nu ook gelezen. De rest van de `attribution*`-velden
 blijft open.*
+
+
+
 
 **P10-15 Bestandsinhoud en live logs in het inspectiepaneel** ✅
 *Een bestand kiezen in de activity toonde tot nu alleen het event-record; de inhoud kwam er nooit in.
