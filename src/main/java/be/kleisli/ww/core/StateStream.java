@@ -46,4 +46,15 @@ public class StateStream<T> {
   public Flux<T> flux() {
     return sink.asFlux();
   }
+
+  /**
+   * How many panels are currently listening.
+   *
+   * <p>A collector that costs real CPU can use this to slow down when nobody is looking. State is
+   * only interesting while something displays it - unlike the chronicle, where a missed event is
+   * gone for good.
+   */
+  public int subscribers() {
+    return sink.currentSubscriberCount();
+  }
 }

@@ -46,6 +46,26 @@ class WorkspaceScanServiceTest {
   }
 
   @Test
+  @DisplayName("a round is paced by what the whole round cost, git included")
+  void pacesOnTheWholeRound() throws IOException {
+    // The pacing used to be set from the walk alone, before git was asked anything. On a repository
+    // where `git status` is slow that let the round spend whatever git asked on top of the tenth of
+    // a core the duty cycle promises. Here the assertion is the observable half: with pacing on, a
+    // second call in the same millisecond does no round at all.
+    props.setFsPollMs(750);
+    Files.writeString(workspace.resolve("one.txt"), "x");
+    scanner.scan();
+    int afterBaseline = bus.replay().size();
+
+    Files.writeString(workspace.resolve("two.txt"), "y");
+    scanner.scan();
+
+    assertThat(since(afterBaseline))
+        .describedAs("the second scan should have been paced away, not run")
+        .isEmpty();
+  }
+
+  @Test
   @DisplayName("the first pass establishes a baseline instead of replaying the tree")
   void firstPassDoesNotFlood() throws IOException {
     for (int i = 0; i < 20; i++) {

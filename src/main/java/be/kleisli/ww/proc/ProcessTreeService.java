@@ -69,12 +69,50 @@ public class ProcessTreeService {
     return stream;
   }
 
-  @Scheduled(fixedDelayString = "${watcher.process-poll-ms:2000}")
+  /**
+   * Share of wall-clock time this sampler may spend in {@code lsof}, as the scanner does for its
+   * walk.
+   *
+   * <p>Measured on this machine, one {@code lsof -a -d cwd -F pn} costs 110ms. At the configured
+   * two seconds that is 5.5% of a core, permanently - more than the whole of the rest of the
+   * watcher, which measured 1.1% while idle - and it does not show up in the watcher's own CPU
+   * figure at all, because the cost is charged to a child process. On a busier machine, where lsof
+   * takes a second, the fixed interval would have spent half a core.
+   */
+  private static final long DUTY_CYCLE_DIVISOR = 10;
+
+  /**
+   * How much slower to sample while no panel is subscribed.
+   *
+   * <p>The process tree is state, not a chronicle: nothing is lost by not looking, and a panel gets
+   * the current value the moment it connects. The resource series keeps being written either way,
+   * only coarser - which is the honest trade, because the alternative is spending a twentieth of a
+   * core on a question nobody is asking.
+   */
+  private static final long IDLE_MULTIPLIER = 5;
+
+  private long nextPollAt;
+
+  @Scheduled(fixedDelay = 250)
   public void poll() {
     Path workspace = active.get();
     if (props.getProcessPollMs() <= 0 || workspace == null) {
       return;
     }
+    if (System.currentTimeMillis() < nextPollAt) {
+      return;
+    }
+    long startedAt = System.nanoTime();
+    try {
+      round(workspace);
+    } finally {
+      long tookMs = (System.nanoTime() - startedAt) / 1_000_000;
+      long base = props.getProcessPollMs() * (stream.subscribers() == 0 ? IDLE_MULTIPLIER : 1);
+      nextPollAt = System.currentTimeMillis() + Math.max(base, tookMs * DUTY_CYCLE_DIVISOR);
+    }
+  }
+
+  private void round(Path workspace) {
     Map<Long, String> inWorkspace = processesWithCwdIn(workspace);
 
     // Sampled every poll, before the tree is compared. A steady build keeps the same processes for

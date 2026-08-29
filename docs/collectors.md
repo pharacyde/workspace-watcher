@@ -38,8 +38,10 @@ was measured and lost. It is not a description of what the collectors do.
 ## Hooks and the spool
 
 - **The hook script must stay fast and silent.** It runs on every tool call and blocks the agent
-  until it returns. Default path is a spool file: ~5 ms, no dependencies, and the event survives the
-  watcher being down. Do not "simplify" this to a network call — that trade was measured and lost.
+  until it returns. Default path is a spool file: ~6 ms with the bash macOS
+  ships, no dependencies, and the event survives the watcher being down. That figure is what is
+  left after removing four of the six processes it used to fork per call - it was measured at
+  21 ms while this file claimed 5, which is the sort of number that stops being true quietly. Do not "simplify" this to a network call — that trade was measured and lost.
   A WebSocket looks tidier and is strictly worse for the same reason: a hook is a fresh process per
   tool call, so a persistent connection has nothing to amortise and pays its handshake every time,
   measured at 50 ms plus a node dependency against 5 ms for a file.

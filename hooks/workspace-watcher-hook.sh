@@ -43,8 +43,13 @@ if [ -z "${WORKSPACE_WATCHER_URL:-}" ]; then
   # Namespaced per project, with the same escaping Claude Code uses for its transcript directories
   # (every non-alphanumeric character becomes a dash). Installed globally, this keeps one project's
   # events out of another project's watcher.
-  SPOOL="$BASE/$(printf '%s' "$PROJECT" | tr -c 'A-Za-z0-9' '-')"
-  mkdir -p "$SPOOL" 2>/dev/null || exit 0
+  # Parameter expansion rather than `printf | tr`: that was a subshell plus a process, and this
+  # script runs inside every tool call the agent makes. Measured on this machine, one fork costs
+  # 2-3 ms, which is a tenth of what the whole hook used to take. Works in bash 3.2, which is what
+  # macOS ships and therefore what `#!/usr/bin/env bash` finds on a machine without homebrew.
+  SPOOL="$BASE/${PROJECT//[!A-Za-z0-9]/-}"
+  # Only the first call in a project pays for mkdir; the test is a builtin.
+  [ -d "$SPOOL" ] || mkdir -p "$SPOOL" 2>/dev/null || exit 0
 
   # The directory name is escaped and therefore not reversible, so the real path is left beside it
   # once. This is what lets a watcher start with no workspace configured and discover the projects
@@ -54,17 +59,27 @@ if [ -z "${WORKSPACE_WATCHER_URL:-}" ]; then
   # Self-pruning, because nothing else will. A watcher drains and ages out the spool, but a project
   # that never has one would otherwise accumulate a file per tool call forever. Bounded to one pair
   # of cheap find calls per five minutes rather than one per tool call.
-  MARK="$SPOOL/.last-prune"
-  if [ ! -f "$MARK" ] || [ -z "$(find "$MARK" -mmin -5 2>/dev/null)" ]; then
-    touch "$MARK" 2>/dev/null
-    find "$SPOOL" -name '*.json' -mmin +60 -delete 2>/dev/null
+  # The five-minute guard used to cost a `find` on every single call to decide it had nothing to
+  # do - the check was more expensive than the work it was avoiding. Sampled instead: roughly one
+  # call in 128 looks, and that one still applies the same mtime guard, so the prune stays bounded
+  # to once per five minutes while 127 calls out of 128 fork nothing at all.
+  if [ $((RANDOM % 128)) -eq 0 ]; then
+    MARK="$SPOOL/.last-prune"
+    if [ ! -f "$MARK" ] || [ -z "$(find "$MARK" -mmin -5 2>/dev/null)" ]; then
+      touch "$MARK" 2>/dev/null
+      find "$SPOOL" -name '*.json' -mmin +60 -delete 2>/dev/null
+    fi
   fi
 
   # Written to a temporary name and renamed into place. Rename is atomic within a filesystem, so
   # the watcher can never read a half-written payload - no locking, no partial JSON.
   TMP="$SPOOL/.tmp.$$.$RANDOM"
+  # No timestamp in the name, and no `date` process to produce one. The drain orders by
+  # modification time precisely because a name is the weaker signal - APFS timestamps are
+  # nanosecond-granular where a name was only accurate to the second - so the name only has to be
+  # unique, and the pid plus two draws is that.
   if cat > "$TMP" 2>/dev/null; then
-    mv -f "$TMP" "$SPOOL/$(date +%Y%m%dT%H%M%S)-$$-$RANDOM.json" 2>/dev/null || rm -f "$TMP" 2>/dev/null
+    mv -f "$TMP" "$SPOOL/$$-$RANDOM-$RANDOM.json" 2>/dev/null || rm -f "$TMP" 2>/dev/null
   else
     rm -f "$TMP" 2>/dev/null
   fi

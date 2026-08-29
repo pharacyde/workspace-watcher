@@ -111,11 +111,15 @@ public class WorkspaceScanService {
       current = snapshot(root);
     } catch (IOException e) {
       log.debug("workspace scan failed: {}", e.toString());
+      pace(startedAt);
       return;
     }
-    long tookMs = (System.nanoTime() - startedAt) / 1_000_000;
-    long interval = Math.max(props.getFsPollMs(), tookMs * DUTY_CYCLE_DIVISOR);
-    nextScanAt = System.currentTimeMillis() + interval;
+    long walkMs = (System.nanoTime() - startedAt) / 1_000_000;
+    // Paced at the end of the round rather than here, because the walk is no longer the expensive
+    // half: `git.refresh()` below starts five git processes, measured at 57ms in this repository
+    // and more on a large one, and pacing on the walk alone left that outside the budget entirely -
+    // the duty cycle promised a tenth of a core and was silently spending more.
+    long interval = Math.max(props.getFsPollMs(), walkMs * DUTY_CYCLE_DIVISOR);
 
     if (interval > SLOW_SCAN_NOTICE_MS && !noticedSlow) {
       noticedSlow = true;
@@ -127,7 +131,7 @@ public class WorkspaceScanService {
               .summary(
                   current.size()
                       + " files take "
-                      + tookMs
+                      + walkMs
                       + "ms to scan; file events will lag by up to "
                       + interval / 1000
                       + "s")
@@ -143,6 +147,7 @@ public class WorkspaceScanService {
               .summary("watching " + root + " (" + current.size() + " files)")
               .path(root.toString()));
       git.refresh();
+      pace(startedAt);
       return;
     }
 
@@ -178,6 +183,7 @@ public class WorkspaceScanService {
       // Nothing in the tree moved, but git itself may have: a commit leaves every file exactly as
       // it was, and without this the working tree panel kept listing what had just been committed.
       git.refreshIfGitChanged();
+      pace(startedAt);
       return;
     }
 
@@ -205,6 +211,28 @@ public class WorkspaceScanService {
       deleted.forEach(file -> emit("DELETED", root, file));
     }
     git.refresh();
+    pace(startedAt);
+  }
+
+  /**
+   * Sets when the next round may start, from what this one actually cost.
+   *
+   * <p>Measured from the start of the walk to after git has answered, so everything the round does
+   * is inside the duty cycle. Pacing on the walk alone was the bug this replaces: on a repository
+   * where `git status` is slow, the scanner kept its promised tenth of a core for the part it
+   * measured and spent whatever git asked on top.
+   */
+  private void pace(long startedAt) {
+    if (props.getFsPollMs() <= 0) {
+      // Zero means "scan when told to", which is how the tests drive this by hand: they call
+      // scan() several times in a row and expect each call to do a round. Pacing off the measured
+      // round would otherwise make the second call a no-op for as long as git took.
+      nextScanAt = 0;
+      return;
+    }
+    long roundMs = (System.nanoTime() - startedAt) / 1_000_000;
+    nextScanAt =
+        System.currentTimeMillis() + Math.max(props.getFsPollMs(), roundMs * DUTY_CYCLE_DIVISOR);
   }
 
   /**

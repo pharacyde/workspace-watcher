@@ -5,7 +5,7 @@ that was tried and rejected. None of it is a description of how the components w
 
 Lit web components in TypeScript, built by Vite into `src/main/resources/static`. No React: Lit is
 5.9 kB gzipped against roughly 45 kB, has no virtual DOM to diff on every event, and the entry
-bundle is 82 kB (25 kB gzipped) with Monaco code-split.
+bundle is 149 kB (40.5 kB gzipped) with Monaco code-split.
 
 - **Subscriptions are ReactiveControllers** (`src/api/subscriptions.ts`), so they follow the host
   element's lifecycle and need no cleanup bookkeeping in components.

@@ -269,6 +269,98 @@ De naam van de app niet voluit, want een tab toont een karakter of tien en die h
 te gaan; en geen logo in de tekst, want de tab tekent het oog er als icoon al pal naast. `src/title.ts` stelt de titel samen, want de badge met gemiste gebeurtenissen schrijft er
 ook in en wie als tweede `document.title` zet wist de helft van de ander.*
 
+## Epic 11 — Performantie, gemeten (aug 2026)
+
+*Aanleiding: een review op architectuur en performantie, met een meetopstelling ernaast - een kloon
+van de repo als workspace (15.110 bestanden), een echte Maven-build erin, een burst van 4000
+bestanden, een JFR-profiel op de watcher. De vaste eis is niet "zo snel mogelijk" maar invariant 1:
+steel geen CPU van wat je observeert, en blokkeer de agent nooit. Gemeten basis: de watcher zelf
+kost 1,1% van een core in rust, 3,3% tijdens een burst, en het JFR-profiel geeft nauwelijks samples
+buiten `scan()`. De Java-kant is dus goedkoop - de kosten zitten in kindprocessen en in twee
+plekken die per tick herhalen.*
+
+**P11-01 De hook kostte 21 ms per tool-call, niet 5** ✅
+*Gemeten p50 21 ms (p95 25 ms) op het spoolpad, waar de documentatie ~5 ms beloofde - en dit is de
+enige plek waar de observer de agent echt ophoudt. Zes forks per aanroep: `$(printf | tr)` voor het
+escapen, `mkdir -p`, een `find` bij élke aanroep om te beslissen dat de prune nog niet hoefde, `cat`,
+`$(date)` voor de bestandsnaam, `mv`. Vier ervan zijn weg: parameter-expansie in plaats van `tr`,
+`mkdir` alleen als de map ontbreekt, de prune-guard bemonsterd op ongeveer 1 op 128 aanroepen met
+dezelfde vijfminutengrens, en geen `date` meer - de drain sorteert op mtime, juist omdat een naam op
+secondenprecisie de zwakkere sortering is. Zelfde shell voor en na: 14,7 → 6,2 ms met `/bin/bash`,
+19,0 → 9,9 ms met bash 5.3. Bash 3.2-compatibel gebleven, want dat is wat `env bash` op een schone
+Mac vindt.*
+
+**P11-02 `lsof` kostte 5% van een core voor een vraag die niemand stelde** ✅
+*Eén `lsof -a -d cwd -F pn` kost gemeten 110 ms en liep elke 2 s, ook met alle panelen dicht. Dat is
+5,5% van een core, permanent - meer dan de hele rest van de watcher - en het stond in geen enkele
+meting, omdat de kost naar een kindproces gaat en niet naar de JVM. Nu twee dingen: de cadans is
+begrensd door dezelfde duty cycle die de scanner al hanteert (nooit meer dan een tiende van de tijd
+in lsof, dus op een trage machine vanzelf trager), en zolang niemand op `processTree` geabonneerd is
+gaat hij vijf keer trager. Geteld met een PATH-shim over 60 s: 28 → 5 aanroepen zonder open paneel,
+en met de pagina open 29 in 70 s, dus de snelle cadans is er wanneer iemand kijkt. De reeks met
+CPU-metingen blijft doorlopen, alleen grover - dat is de eerlijke ruil, want state is alleen
+interessant zolang iets het toont.*
+
+**P11-03 `git.refresh()` viel buiten het duty-cycle-budget van de scanner** ✅
+*De scanner leidt zijn tempo af van hoe lang een ronde kost, maar mat alleen de boomwandeling -
+terwijl `GitService.read()` er vijf git-processen achteraan start, samen 57 ms in deze repo en meer
+op een grote. De belofte was een tiende van een core en werd stilzwijgend overschreden. Het tempo
+wordt nu bepaald ná git, aan het eind van elke ronde en op elke uitgang ervan. `fs-poll-ms: 0`
+betekent expliciet "scan wanneer ik het zeg", wat de tests gebruiken om rondes met de hand te
+sturen.*
+
+**P11-04 Een koude `usage`-query blokkeert een request-thread 1,5 seconde** 🟡
+*Gemeten op het grootste project hier (1,2 GB aan transcripts, 769 bestanden): koud 1,46 s, warm
+22 ms. De cache werkt dus, maar hij is size-based: het transcript dat op dat moment groeit valt bij
+elke tick uit de cache en wordt volledig opnieuw geparsed, terwijl `TranscriptTailService` datzelfde
+bestand al incrementeel leest. De timeline pollt elke 5 s, usage elke 15 s, per tab. Voorstel:
+incrementeel lezen vanaf de laatste offset, en `forCosting()` één keer per query in plaats van drie.
+Daarnaast: de cache heeft geen cap en wordt bij een workspace-wissel nooit geleegd.*
+
+**P11-05 Verlies is onzichtbaar voor wie kijkt** 🟢
+*Beide dropwegen - de per-abonnee buffer in `EventBus` en de queue van `EventStore` - loggen alleen
+aan de serverkant. Het schema heeft geen teller, en de client filtert op `seq <= lastSeq`, wat een
+gat niet van normale voortgang onderscheidt. Voor een project dat expliciet tegen stille onjuistheid
+is gebouwd, is dat de opvallendste inconsistentie die de review opleverde. Voorstel: twee tellers op
+`Status` en één `SYSTEM`-event bij de eerste drop - dezelfde vorm als `SLOW_SCAN`.*
+
+**P11-06 `detail` wordt één plus N keer per event geserialiseerd** 🟢
+*Eén keer in `EventStore.record` op de thread van de collector, en daarna nog eens per abonnee in
+`ApiMapper.toEvent`. Tot 4000 tekens per event. Voorstel: één keer serialiseren bij `publish()` en de
+string meedragen; `ApiMapper.toEvent(Stored)` doet dat al goed voor opgeslagen events.*
+
+**P11-07 Elk event gaat twee keer over de socket** 🟢
+*De feed en het notificatiepaneel hebben elk hun eigen `Events`-abonnement, dus elk event wordt twee
+keer geserialiseerd, verstuurd en geparsed - inclusief het volledige `detail`-veld, dat notify niet
+gebruikt (het kijkt alleen naar type, source, ts en summary, en alleen terwijl de tab verborgen is).
+Gemeten 2328 bytes per bericht bij een detail van 2 kB.*
+
+**P11-08 `toLocaleTimeString` per zichtbare rij per frame** 🟢
+*De virtualizer hertekent zijn zichtbare bereik bij elke update, dus bij ~60 rijen op 60 fps zijn dat
+3600 Intl-formatteringen per seconde. Gemeten 1,25 ms per frame tegen 0,03 ms met één gehoiste
+`Intl.DateTimeFormat` - 7,5% van het frame-budget, voor drie regels werk. `timeline.ts` doet het al
+zo.*
+
+**P11-09 Gepauzeerd is duurder dan niet-gepauzeerd** 🟡
+*In de paused-tak van `subscriptions.ts` gaat elk binnenkomend event langs de rAF-batching heen met
+een eigen `requestUpdate()`, terwijl die batching precies voor dit geval bestaat. De buffer is daar
+bovendien ongebonden: vijf minuten pauze tijdens een build is honderdduizenden events in het
+geheugen. De knop zegt "niets gaat verloren" - met een cap wordt dat "de laatste N", en dat moet er
+dan ook staan.*
+
+**P11-10 Twee getallen in de documentatie klopten niet meer** ✅
+*De entry-bundel is 149 kB raw / 40,5 kB gzipped, niet 82/25. En de hook was 21 ms, niet 5. Allebei
+rechtgezet; het argument tegen React blijft overeind, alleen het getal was verouderd.*
+
+**P11-11 Wat de review expliciet goedkeurde** ✅
+*`EventBus` (kort slot, fan-out erbuiten, sequentiefilter dicht het gat), `Shell` (watchdog en de
+volgorde readAllBytes-vóór-waitFor), `FileTailService`/`FileChangeService`, de panelisolatie in de
+frontend, en de duty cycle van de scanner als vorm. Ook waard om te weten: de FS-laag kan structureel
+geen duizenden events per seconde produceren - `maxFileEventsPerScan: 200` bij minimaal 750 ms is
+~267/s, daarboven één `BULK`. Een burst van 4000 bestanden leverde precies dat op, met nul drops.*
+
+---
+
 **P10-21 Het working tree paneel bleef plakken na een commit** ✅ *(gemeld tijdens gebruik)*
 *Na een commit bleef het paneel de bestanden tonen die net gecommit waren, en een klik erop opende
 een lege diff. De scanner ververst git alleen als hij een bestand zag veranderen, en een commit
