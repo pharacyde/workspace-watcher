@@ -277,6 +277,15 @@ hielp niet, want het verouderde beeld zit aan de serverkant. Een stille scan ste
 en HEAD (grootte en mtime) en ververst als die bewogen: twee stat-calls, tegenover een `git status`
 per scan, wat op een grote repository juist de dure oproep is waarvoor die poort er staat.*
 
+**P10-22 De open diff bleef ook plakken na een commit** ✅ *(gemeld tijdens gebruik)*
+*Zelfde familie als P10-21, één laag dieper. De linkerkant van een diff is `git show HEAD:<pad>`,
+dus een commit verandert de diff volledig terwijl grootte en mtime van het bestand precies blijven
+wat ze waren - en `fileChanged`, dat alleen het bestand stat, zweeg. Het paneel toonde dus nog de
+verschillen met de vórige commit, met de `live`-badge aan boven een diff die niet meer kon
+binnenkomen. De poll vergelijkt nu ook de HEAD uit het snapshot dat `GitService` toch al bijhoudt,
+en meldt het bestand als die bewoog: geen extra proces. Live nagemeten: 2 gemarkeerde diff-regels
+vóór de commit, 0 twee seconden erna.*
+
 **P10-17 In een jar of zip kijken vanuit het procesdetail** 🟢 *(gevraagd tijdens gebruik)*
 *Een proces houdt zijn eigen jar of zip open, en daar houdt het paneel nu op: de tail antwoordt
 `binary`. Erin kunnen kijken zoals in een map - de entries, en doorklikken naar wat erin zit.*

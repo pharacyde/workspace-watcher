@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,6 +62,8 @@ public class FileChangeService {
       return Flux.just(new Change(relativePath, -1, null, true));
     }
     AtomicReference<Change> last = new AtomicReference<>();
+    // The left-hand side of a diff is `git show HEAD:<path>`, which moves without the file moving.
+    AtomicReference<String> lastHead = new AtomicReference<>(git.current().head());
     return Flux.concat(
             Flux.defer(
                 () -> {
@@ -73,6 +76,18 @@ public class FileChangeService {
                 .handle(
                     (tick, sink) -> {
                       Change change = record(relativePath, file, last);
+                      // A commit changes neither the size nor the modification time of the file,
+                      // and it changes the diff completely: what was a page of changes becomes
+                      // nothing at all. Without this the panel went on showing the differences
+                      // against the previous commit, with the live badge lit over a diff that
+                      // could no longer arrive. Read from the snapshot GitService already holds,
+                      // so this costs no process.
+                      if (change == null
+                          && !Objects.equals(git.current().head(), lastHead.get())
+                          && last.get() != null) {
+                        change = last.get();
+                      }
+                      lastHead.set(git.current().head());
                       if (change != null) {
                         sink.next(change);
                       }
