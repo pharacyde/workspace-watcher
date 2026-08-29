@@ -14,8 +14,7 @@ cp target/*.jar target/run/watcher.jar
 $JAVA_HOME/bin/java -jar target/run/watcher.jar --watcher.workspace=/path/to/observe
 ```
 
-Stack: Spring Boot 4.1.1, Java release 25, Maven, Netflix DGS on Spring for GraphQL, Lit + Vite for
-the frontend. Compiled with `-Xlint:all`; keep the build warning-free.
+Compiled with `-Xlint:all`; keep the build warning-free.
 
 **Read [docs/build.md](docs/build.md) before changing the build or running the app any other way.**
 The copy above is not a habit: rebuilding while the app runs pulls the jar out from under the
