@@ -10,60 +10,35 @@ Requires JDK 25+. The default `java` on this machine may be older, so set `JAVA_
 ```bash
 export JAVA_HOME=$(/usr/libexec/java_home -v 26)
 mvn -B -DskipTests package
-$JAVA_HOME/bin/java -jar target/workspace-watcher-0.1.0-SNAPSHOT.jar \
-    --watcher.workspace=/path/to/observe
+cp target/*.jar target/run/watcher.jar
+$JAVA_HOME/bin/java -jar target/run/watcher.jar --watcher.workspace=/path/to/observe
 ```
 
 Stack: Spring Boot 4.1.1, Java release 25, Maven, Netflix DGS on Spring for GraphQL, Lit + Vite for
 the frontend. Compiled with `-Xlint:all`; keep the build warning-free.
 
-`mvn package` builds both halves - Maven downloads a pinned node and runs the frontend build.
-`-DskipFrontend` skips that. Java is formatted by `mvn spotless:apply` (google-java-format, Google
-style); the build fails on anything unformatted.
-
-While developing the UI, run the backend on 8080 and `cd frontend && npm run dev` on 5173. Vite
-serves with hot module replacement and proxies `/graphql` and its WebSocket to 8080, so the app
-talks to a same-origin `/graphql` in both development and production.
-
-Note Spring Boot 4 ships **Jackson 3**: the package is `tools.jackson.databind`, not
-`com.fasterxml.jackson.databind`. `asText()` and `isTextual()` are deprecated in favour of
-`asString()` and `isString()`, and parse failures are unchecked exceptions.
-
-`target/classes/static` is emptied at the start of every build. Vite empties the *source* static
-directory, but Maven only ever copies into `target/classes`, so a bundle that disappeared from the
-source stayed there and was packaged forever after: measured at 1294 asset files for the 30 that
-belong, and a 97 MB jar that is 52 MB once they are gone.
-
-Run it from a **copy** of the jar, not from `target/` itself. A Spring Boot fat jar is read lazily
-- nested jars stay compressed until a class is first needed - so rebuilding while the app runs
-pulls the file out from under the running JVM. It does not fail at once: the pages already served
-keep working, and then a refresh hangs while the log fills with
-`NoClassDefFoundError: ch/qos/logback/classic/spi/ThrowableProxy`, because even Tomcat's error path
-needs a class it can no longer load. `cp target/*.jar target/run/watcher.jar` and start that one.
+**Read [docs/build.md](docs/build.md) before changing the build or running the app any other way.**
+The copy above is not a habit: rebuilding while the app runs pulls the jar out from under the
+running JVM, and it does not fail until the next refresh hangs. That file also has the dev server,
+why Spring Boot 4 means Jackson 3 rather than the package every example imports, and the emptying
+of `target/classes/static` without which every old bundle stays in the jar forever.
 
 ## Design invariants
 
-These are the decisions the project exists to hold. Do not quietly relax them.
+Six, and they are the reason this project exists in the shape it has. In one line each:
 
-1. **The observer never blocks or alters the agent**, with exactly one exception: `GuardService`,
-   which is off by default, needs its own hook installed, and fails open. Anything else that could
-   make a crashed dashboard hang an agent needs the same treatment: an explicit opt-in and a
-   fail-open timeout.
-1b. **"Off" must mean the hook cannot block**, not merely that the wording changes. `check()`
-   downgrades a DENY to WARN while observing. This was a real bug found end to end after unit tests
-   passed — they asserted on the event text and not on what was handed back to the hook. The hook
-   script always exits 0 and swallows errors.
-2. **Never invent attribution.** `FS` events carry no PID because macOS cannot supply one — FSEvents
-   has no PID field, and `lsof` only shows still-open descriptors. Filling that column with a guess
-   would make the whole feed untrustworthy. `WatchEvent.Source` exists so the UI can always show
-   where a fact came from.
-3. **Layer 1 (`TRANSCRIPT`, `HOOK`) is exact; layer 2 (`FS`, `PROCESS`) is a safety net.** When both
-   could supply the same information, prefer layer 1 and say so in the code comment.
-4. **Loopback by default.** This app serves source diffs and command lines with no auth. Do not
-   change `server.address` or add a feature that assumes a reachable port.
-5. **The process panel is a sampler and is documented as such.** Do not present it as complete.
-6. **GraphQL is the whole API.** No REST controllers, including for hooks — those post the
-   `recordAgentEvent` mutation. Schema lives in `src/main/resources/graphql/schema.graphqls`.
+1. **The observer never blocks or alters the agent** - one exception, `GuardService`, off by default.
+1b. **"Off" must mean the hook cannot block**, not merely that the wording changes.
+2. **Never invent attribution.** No PID on an `FS` event, because macOS cannot supply one.
+3. **Layer 1 (`TRANSCRIPT`, `HOOK`) is exact; layer 2 (`FS`, `PROCESS`) is a safety net.**
+4. **Loopback by default.** Diffs and command lines are served with no auth.
+5. **The process panel is a sampler** and is documented as such.
+6. **GraphQL is the whole API.** No REST controllers, hooks included.
+
+**Read [docs/invariants.md](docs/invariants.md) before you weaken one of these, and before adding
+anything that could hang an agent.** Each line there says what it already cost to learn - invariant
+1b was a bug that passed its unit tests, because they asserted on the event text rather than on what
+was handed back to the hook.
 
 ## Layout
 
@@ -101,13 +76,10 @@ a rejected alternative rather than a description.
 
 ## Conventions
 
-- Comments explain *why*, especially where an obvious-looking alternative was rejected. Do not add
-  comments that restate the code.
-- Records for data, constructor injection for services.
-- **No Lombok, deliberately.** It was considered and measured: version 1.18.46, the latest, silently
-  generates nothing on JDK 26 - `@Getter` compiles and the getter simply does not exist. It works on
-  17 and 21, so this is a JDK-26 incompatibility, not a configuration mistake. Lombok hooks into
-  javac internals and has lagged every recent JDK release, so adopting it would mean pinning the
-  compiler to an older JDK indefinitely. Records and constructor injection already cover most of
-  what it would save here.
-- No new dependencies without a reason that survives the "can the JDK already do this" question.
+Comments say *why*, especially where an obvious-looking alternative was rejected; records for data;
+constructor injection for services; no Lombok.
+
+**Read [docs/conventions.md](docs/conventions.md) before adding a dependency or reaching for
+Lombok.** Lombok is not a taste question here: version 1.18.46 silently generates nothing on JDK 26,
+so `@Getter` compiles and the getter does not exist. A new dependency needs a reason that survives
+the "can the JDK already do this" question.
