@@ -118,6 +118,16 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
   new pair first — disposing a model the editor still points at raises "TextModel got disposed
   before DiffEditorWidget model got reset". It does not throw straight away, which is why it only
   surfaced after switching back and forth a few times.
+- **An open diff has to keep up with the file, or it is a photograph.** It was fetched once when
+  the file was selected and never again, so watching an agent edit meant clicking away and back to
+  see anything - the one thing nobody does while reading. The tail says *when* the file changed and
+  `fileVersions` says *what* the two sides are; rebuilding the working copy from the tail's chunks
+  here would put the same fact in two places. Debounced at 600 ms, because a file being written to
+  reports several times a second and every refresh is a `git show` for the left-hand side. Update
+  the models in place rather than replacing the pair: a new pair scrolls the editor back to the top,
+  which for an appending file means losing your place on every write. A file that grows past the
+  diff limit stops the syncing with a note, because both sides then come back empty and blanking a
+  diff that was right a second ago claims the file is empty.
 - **Rebuild the editor whenever the panel returns from an event to a diff.** The container is a
   fresh node by then; guarding only on `path` changing left an editor attached to a detached node
   and an empty panel for a file that had worked a moment earlier.
@@ -142,6 +152,15 @@ bundle is 82 kB (25 kB gzipped) with Monaco code-split.
   the watcher on one and the test wrote its files into the other, and the feed stayed empty for a
   reason no assertion could describe. Decide once, put it in the environment, let the workers
   inherit it.
+- **The tail and the diff do not resolve a path the same way.** `fileVersions` resolves against the
+  repository root, because `git status --porcelain` reports repository-root-relative paths whatever
+  directory it ran in; `fileTail` resolves against the workspace. Those are the same directory only
+  when the workspace *is* the repository root, which is the case in development and in the browser
+  test, so a mismatch is invisible there. The live diff was first built on the tail and would have
+  gone silently dead in a subdirectory workspace - resolving to a file that does not exist, one
+  `gone` chunk, no further notification, and the `live` badge still lit. It now has its own
+  `fileChanged` subscription resolved the way `fileVersions` is, which also stops shipping the whole
+  file over the socket to be used as a boolean.
 - **A `<pre>` in a scrolling parent grows instead of scrolling.** `.event-body` is the scroll
   container, so the file view's `<pre>` reached full content height and following it had nothing to
   scroll - the toggle was on and did nothing. The body becomes a flex column and the child gets

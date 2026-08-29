@@ -473,6 +473,30 @@ type Subscription {
   path is workspace-relative; anything pointing outside the workspace is answered as missing.
   """
   fileTail(path: String!): FileChunk!
+
+  """
+  That a file changed, and nothing about what is in it.
+
+  For a view that already knows how to fetch the file and only needs to be told when its copy went
+  stale - the diff, which reads both sides through fileVersions. Driving that from fileTail shipped
+  the whole file and every chunk after it over the socket to be used as a boolean.
+
+  The path is resolved like fileVersions, relative to the repository root, so the notification and
+  the thing it refreshes mean the same file. fileTail resolves against the workspace instead; the
+  two agree only when the workspace is the repository root.
+  """
+  fileChanged(path: String!): FileChange!
+}
+
+"A file's size and modification time, which is all it takes to know the last read went stale."
+type FileChange {
+  path: String!
+  "Size in bytes, or -1 when the file is not there."
+  size: Float!
+  "Last modification, ISO-8601. Null when the file is not there."
+  modifiedAt: String
+  "The file is missing or outside the repository. The subscription ends after this."
+  gone: Boolean!
 }
 
 "A piece of a file, in the order it was written."

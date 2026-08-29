@@ -335,6 +335,36 @@ test.describe('workspace-watcher dashboard', () => {
     await search('');
   });
 
+  test('an open diff keeps up with the file changing underneath it', async () => {
+    // The whole point of the panel is watching an agent work, and an agent writes while you look.
+    // Until this was fixed the diff was a photograph taken when the file was selected: you had to
+    // click away and back to see anything, which is exactly what nobody does while reading.
+    await setFollow(false);
+    // Its own modification, so the working tree lists it whether or not an earlier test ran: this
+    // suite is serial and shares a page, and a test that only passes in that order hides which
+    // state it actually needs.
+    await appendFile(join(WORKSPACE, 'tracked.txt'), 'opened for the live diff\n');
+    await search('tracked.txt');
+
+    const treeRow = page.locator('ww-git-panel .rowline').filter({ hasText: 'tracked.txt' });
+    await expect(treeRow).toBeVisible({ timeout: SCAN_TIMEOUT });
+    await treeRow.click();
+
+    const panel = page.locator('ww-diff-panel');
+    await expect(panel.locator('.monaco-diff-editor')).toBeVisible({ timeout: SCAN_TIMEOUT });
+    await expect(panel.locator('.live')).toBeVisible();
+
+    const marker = `written-while-the-diff-was-open-${Date.now()}`;
+    await appendFile(join(WORKSPACE, 'tracked.txt'), `${marker}\n`);
+
+    // Nothing is clicked between the write and this assertion, which is the whole claim.
+    await expect(panel.locator('.monaco-diff-editor')).toContainText(marker, {
+      timeout: SCAN_TIMEOUT,
+    });
+
+    await search('');
+  });
+
   test('a row with a path shows the file, and the file keeps growing', async () => {
     await setFollow(false);
     const before = await feedCount();

@@ -1,6 +1,6 @@
 import { css, html, LitElement } from 'lit';
 import { request, subscribe } from '../api/client';
-import { FileTailDocument, FileVersionsDocument } from '../api/documents';
+import { FileChangedDocument, FileTailDocument, FileVersionsDocument } from '../api/documents';
 import type { EventsSubscription } from '../gql/graphql';
 import { panelStyles } from '../styles';
 import { languageFor, loadMonaco, monacoStyleSheet, type DiffEditor } from './monaco';
@@ -85,6 +85,8 @@ export class DiffPanel extends LitElement {
     contentNote: { state: true },
     following: { state: true },
     message: { state: true },
+    diffNote: { state: true },
+    diffLive: { state: true },
     wrap: { state: true },
   };
 
@@ -100,7 +102,18 @@ export class DiffPanel extends LitElement {
   private fileSubscription?: () => void;
   /** The path the running subscription is for, so an unchanged selection is not resubscribed. */
   private followed: string | null = null;
+
+  private diffSubscription?: () => void;
+  /** The path the open diff is being kept in step with, for the same reason. */
+  private diffWatched: string | null = null;
+  private diffRefresh?: number;
+  private diffPending = false;
+  /** Something changed while a refresh was in flight, so one more is owed. */
+  private diffDirty = false;
   declare private message: string | null;
+  /** Why the diff stopped keeping up, when it did. Null while it is in step. */
+  declare private diffNote: string | null;
+  declare private diffLive: boolean;
   declare private wrap: boolean;
 
   private editor: DiffEditor | null = null;
@@ -117,6 +130,13 @@ export class DiffPanel extends LitElement {
       .monaco {
         height: 100%;
         width: 100%;
+      }
+      .live {
+        border: 1px solid var(--add);
+        border-radius: 10px;
+        padding: 0 7px;
+        color: var(--add);
+        letter-spacing: 0.4px;
       }
       /* The body is the scroll container by default, which makes a <pre> inside it grow to its
          full content height instead of scrolling - so following it had nothing to scroll and the
@@ -216,6 +236,8 @@ export class DiffPanel extends LitElement {
     this.path = null;
     this.event = null;
     this.message = 'select a row or a file to inspect it';
+    this.diffNote = null;
+    this.diffLive = false;
     this.wrap = false;
     this.view = 'content';
     this.content = '';
@@ -227,6 +249,7 @@ export class DiffPanel extends LitElement {
     super.disconnectedCallback();
     this.disposeEditor();
     this.stopFollowing();
+    this.stopWatchingDiff();
   }
 
   private stopFollowing() {
@@ -277,6 +300,113 @@ export class DiffPanel extends LitElement {
     );
   }
 
+  private stopWatchingDiff() {
+    this.diffSubscription?.();
+    this.diffSubscription = undefined;
+    this.diffWatched = null;
+    this.diffLive = false;
+    // Cleared here rather than only on the next successful watch: a note about the file you just
+    // left was rendered under the new file's heading while the new one was still loading.
+    this.diffNote = null;
+    if (this.diffRefresh) clearTimeout(this.diffRefresh);
+    this.diffRefresh = undefined;
+  }
+
+  /**
+   * Keeps an open diff in step with the file on disk.
+   *
+   * <p>The diff used to be a photograph: fetched once when the file was selected, and then wrong
+   * for as long as the agent kept writing - you had to click away and back to see anything. The
+   * tail says *when* the file changed and the server says *what* the two sides are, rather than
+   * this side rebuilding the working copy out of the chunks it was handed. One source of truth for
+   * the content, and the tail is only the notification.
+   *
+   * <p>Debounced, because a file being written to reports several times a second and every refresh
+   * is a `git show` for the left-hand side. Coalescing them costs a moment of staleness and saves a
+   * process per notification.
+   */
+  private watchDiff(path: string) {
+    if (this.diffWatched === path) return;
+    this.stopWatchingDiff();
+    this.diffWatched = path;
+    this.diffLive = true;
+    this.diffNote = null;
+    // The first message is the file's present state, delivered on subscribe - which is what was
+    // just fetched. Refreshing on it would read every file a second time the moment it opens.
+    let primed = false;
+    this.diffSubscription = subscribe(
+      FileChangedDocument,
+      ({ fileChanged }) => {
+        if (this.diffWatched !== path) return;
+        // Before the primed guard: a file that is already gone says so in that very first message,
+        // and swallowing it left the badge lit over a diff that would never change again.
+        if (fileChanged.gone) {
+          this.stopWatchingDiff();
+          this.diffNote = 'the file is gone; showing the last version read';
+          return;
+        }
+        if (!primed) {
+          primed = true;
+          return;
+        }
+        if (this.diffRefresh) return;
+        this.diffRefresh = window.setTimeout(() => {
+          this.diffRefresh = undefined;
+          void this.refreshDiff(path);
+        }, 600);
+      },
+      { path },
+    );
+  }
+
+  /**
+   * Re-reads both sides and puts them into the models that are already on screen.
+   *
+   * <p>The models are updated rather than replaced: a new pair scrolls the editor back to the top,
+   * which for a file being appended to means losing your place every time the agent writes. The
+   * scroll position is carried across the edit for the same reason.
+   */
+  private async refreshDiff(path: string) {
+    if (this.path !== path || !this.editor) return;
+    if (this.diffPending) {
+      // A change that lands while the previous read is in flight used to be dropped, so the last
+      // write to a file could be missing from a diff the badge still called live.
+      this.diffDirty = true;
+      return;
+    }
+    this.diffPending = true;
+    try {
+      const { fileVersions } = await request(FileVersionsDocument, { path });
+      if (this.path !== path || !this.editor) return;
+      if (fileVersions.binary || fileVersions.tooLarge) {
+        // Both sides come back empty then, and blanking a diff that was right a second ago says
+        // the file is empty - a different claim than "it outgrew what this can show".
+        this.stopWatchingDiff();
+        this.diffNote = 'the file outgrew the diff limit; showing the last version read';
+        return;
+      }
+      const model = this.editor.getModel();
+      if (!model) return;
+      const modified = this.editor.getModifiedEditor();
+      const scroll = modified.getScrollTop();
+      if (model.original.getValue() !== fileVersions.head) {
+        model.original.setValue(fileVersions.head);
+      }
+      if (model.modified.getValue() !== fileVersions.working) {
+        model.modified.setValue(fileVersions.working);
+        modified.setScrollTop(scroll);
+      }
+    } catch {
+      // A refresh that fails leaves the last good diff standing; the next change tries again.
+    } finally {
+      this.diffPending = false;
+      if (this.diffDirty) {
+        this.diffDirty = false;
+        void this.refreshDiff(path);
+      }
+    }
+  }
+
   private async scrollContentToEnd() {
     if (!this.following) return;
     await this.updateComplete;
@@ -317,6 +447,7 @@ export class DiffPanel extends LitElement {
       this.view = 'content';
     }
     if (this.event) {
+      this.stopWatchingDiff();
       // Showing an event means the diff container has left the DOM. Holding on to an editor
       // attached to a detached node is what made returning to the same file show an empty panel:
       // the path had not changed, so nothing rebuilt, and the fresh container stayed empty.
@@ -324,10 +455,14 @@ export class DiffPanel extends LitElement {
       return;
     }
     if (!this.path) {
+      this.stopWatchingDiff();
       this.message = 'select a row or a file to inspect it';
       return;
     }
     const requested = this.path;
+    // A different file is a different subscription; the old one would otherwise keep refreshing a
+    // diff that is no longer on screen.
+    if (this.diffWatched !== requested) this.stopWatchingDiff();
 
     // Monaco is fetched the first time a file is opened, not on page load. It is by far the
     // heaviest thing here, and a dashboard that is mostly watched rather than clicked should not
@@ -370,6 +505,7 @@ export class DiffPanel extends LitElement {
         });
         previous?.original.dispose();
         previous?.modified.dispose();
+        this.watchDiff(requested);
       })
       .catch((error: Error) => {
         if (this.path !== requested) return;
@@ -469,9 +605,13 @@ export class DiffPanel extends LitElement {
       `;
     }
     return html`
-      <h2>Diff<span class="note">${this.path ?? ''}</span></h2>
+      <h2>
+        Diff<span class="note">${this.path ?? ''}</span>
+        ${this.diffLive ? html`<span class="live">live</span>` : ''}
+      </h2>
       <div class="body diff-body">
         ${this.message ? html`<p class="empty">${this.message}</p>` : ''}
+        ${this.diffNote && !this.message ? html`<p class="empty">${this.diffNote}</p>` : ''}
         <div class="monaco" style=${this.message ? 'display:none' : 'display:block'}></div>
       </div>
     `;

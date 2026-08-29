@@ -175,6 +175,16 @@ public class ApiMapper {
         .toList();
   }
 
+  public be.kleisli.ww.generated.types.FileChange toFileChange(
+      be.kleisli.ww.fs.FileChangeService.Change change) {
+    return be.kleisli.ww.generated.types.FileChange.newBuilder()
+        .path(change.path())
+        // Float on the wire like every other size here: a log outgrows a 32-bit GraphQL Int.
+        .size((double) change.size())
+        .modifiedAt(change.modifiedAt())
+        .gone(change.gone())
+        .build();
+  }
 
 
   public UsageSummary toUsage(UsageService.Summary summary, AccountLimits.Snapshot limits) {

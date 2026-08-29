@@ -176,6 +176,16 @@ export const UsageDocument = graphql(`
   }
 `);
 
+export const FileChangedDocument = graphql(`
+  subscription FileChanged($path: String!) {
+    fileChanged(path: $path) {
+      path
+      size
+      modifiedAt
+      gone
+    }
+  }
+`);
 
 
 export const ActivityDocument = graphql(`

@@ -8,6 +8,7 @@ import be.kleisli.ww.core.ActiveWorkspace;
 import be.kleisli.ww.core.EventBus;
 import be.kleisli.ww.core.WatchEvent;
 import be.kleisli.ww.core.WatcherProperties;
+import be.kleisli.ww.fs.FileChangeService;
 import be.kleisli.ww.fs.FileTailService;
 import be.kleisli.ww.generated.types.FileVersions;
 import be.kleisli.ww.generated.types.GitSnapshot;
@@ -64,6 +65,7 @@ public class WatchDataFetcher {
   private final EventBus eventBus;
   private final GitService git;
   private final FileTailService fileTail;
+  private final FileChangeService fileChanges;
   private final ProcessTreeService processes;
   private final TranscriptTailService transcripts;
   private final ApiMapper mapper;
@@ -83,6 +85,7 @@ public class WatchDataFetcher {
       ProcessTreeService processes,
       TranscriptTailService transcripts,
       FileTailService fileTail,
+      FileChangeService fileChanges,
       ApiMapper mapper,
       ObjectMapper objectMapper) {
     this.properties = properties;
@@ -96,6 +99,7 @@ public class WatchDataFetcher {
     this.eventBus = eventBus;
     this.git = git;
     this.fileTail = fileTail;
+    this.fileChanges = fileChanges;
     this.processes = processes;
     this.transcripts = transcripts;
     this.mapper = mapper;
@@ -231,6 +235,18 @@ public class WatchDataFetcher {
   @DgsSubscription
   public Publisher<be.kleisli.ww.generated.types.FileChunk> fileTail(@InputArgument String path) {
     return fileTail.follow(path).map(mapper::toFileChunk);
+  }
+
+  /**
+   * That a file changed, for a view that fetches the content itself.
+   *
+   * <p>Separate from {@code fileTail} on purpose: the diff needs to be told its copy went stale,
+   * and being handed the file again to work that out is the whole cost this avoids.
+   */
+  @DgsSubscription
+  public Publisher<be.kleisli.ww.generated.types.FileChange> fileChanged(
+      @InputArgument String path) {
+    return fileChanges.watch(path).map(mapper::toFileChange);
   }
 
   /** Current working tree. Emits the present value on subscribe, then on every change. */
