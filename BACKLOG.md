@@ -378,6 +378,31 @@ binnenkomen. De poll vergelijkt nu ook de HEAD uit het snapshot dat `GitService`
 en meldt het bestand als die bewoog: geen extra proces. Live nagemeten: 2 gemarkeerde diff-regels
 vóór de commit, 0 twee seconden erna.*
 
+**P10-23 Een submodule was één doodlopende regel** ✅ *(gemeld tijdens gebruik)*
+*Niet uit de brainstorm; bovengekomen omdat `omv-master` feitelijk onbewaakt bleef. `git status`
+vouwt een submodule dicht tot één gitlink-regel en geen enkele vlag maakt dat anders — ook
+`--ignore-submodules=none` niet — dus een superproject van achttien submodules, waar al het echte
+werk binnenin gebeurt, kreeg één regel per repository en verder niets. Er wordt nu per *dirty*
+submodule afgedaald: niets dirty kost niets extra, één dirty kost 20ms bovenop 224ms. Het afgewezen
+alternatief was `--ignore-submodules=dirty` (14ms) en dan onvoorwaardelijk in alle achttien
+afdalen: 556ms per keer, en als poort ook nog fout, want die vlag meldt niets voor een submodule
+die alleen dirty is. Het paneel groepeert per module, met invouwen en een telling van wat er
+verdwijnt. Twee soorten rijen die geen bestand zijn kregen hun eigen woord en hun eigen uitleg:
+`nested` voor een repository die dit project niet kent, `symlink` voor iets zonder eigen inhoud.
+
+En de stamp moest mee: een commit ín een submodule laat index en HEAD van het superproject
+byte-identiek, dus P10-21 kwam één repository lager gewoon terug. Elke submodule-index wordt nu
+gestempeld, via `commondir`, want een linked worktree houdt zijn eigen index en HEAD maar deelt
+`.git/modules` met de hoofdcheckout. Gemeten op 0,15ms voor achttien submodules.
+
+Uit de review, elk eerst nagemeten: de poort is de aanwezigheid van `.git` en niet "tracked en een
+map", want een tracked bestand dat op schijf een map werd las als submodule en leverde elk bestand
+eronder een tweede keer op onder een verdubbeld pad; `git status` draait met
+`--no-optional-locks`, want het herschrijft de index en pakt daarvoor `.git/index.lock` — een agent
+die op dat moment commit faalt, en dat is invariant 1 gebroken door de waarnemer zelf; en
+`resolveInRepo` real-pathed nu, want `normalize()` is lexicaal en liet een symlink de repository
+uit wijzen op een server zonder authenticatie.*
+
 **P10-17 In een jar of zip kijken vanuit het procesdetail** 🟢 *(gevraagd tijdens gebruik)*
 *Een proces houdt zijn eigen jar of zip open, en daar houdt het paneel nu op: de tail antwoordt
 `binary`. Erin kunnen kijken zoals in een map - de entries, en doorklikken naar wat erin zit.*
@@ -518,7 +543,7 @@ moet naar UTC voor het de database in gaat.*
 *Vorm: markers op de bestaande tijdlijn, want die kan al een venster aanklikken om terug te spelen
 (P7-03), plus een lijst waarin je een commit kiest en ziet wat eraan voorafging.*
 
-**P11-02 Het dashboard vergeet alles zodra je commit** 🟢 — defect
+**P11-02 Het dashboard vergeet alles zodra je commit** ✅
 *Het scherpste deel van het probleem hierboven, en los van de tijdlijn al de moeite waard.
 `fileVersions` vergelijkt altijd `HEAD:<pad>` met de schijf, dus na een commit zijn beide kanten
 identiek en toont het diff-paneel een leeg scherm voor een bestand waar een uur werk in zit. Alles
@@ -529,6 +554,18 @@ veranderde. Wat ontbreekt is een revisie-argument op `fileVersions` — nu impli
 plaats van alleen die van niet-vastgelegd werk. Let op de bestaande valkuil: `git show <rev>:<pad>`
 wordt vanaf de repository-root opgelost en een bestand in een submodule hoort bij een andere
 repository — `versions()` heeft daar al een regressietest voor die niet mag sneuvelen.*
+
+*Gedaan. `fileVersions(path, rev)` bestaat, met `leftRev`, `rightRev` en `live` erbij zodat het
+antwoord zelf zegt welk paar het is in plaats van de caller te laten aannemen dat het HEAD tegen de
+werkkopie is. Zonder revisie is dat het ook nog steeds, behalve als er niets ongecommit is: dan de
+laatste commit die het bestand raakte, want twee identieke lege panelen op het moment dat het werk
+af is was het hele probleem. Het paneel toont dan een grijze `a1b2c3 → d4e5f6`-chip in plaats van de
+groene `live`-badge, omdat een afgeronde diff geen live-badge mag dragen. De valkuil met submodules
+staat overeind: de regressietest leeft nog en er kwamen er dertien bij. Twee dingen die de review
+opleverde en die hier horen: een revisie wordt gefilterd op een patroon én afgesloten met `--`,
+want `git log -1 docs` accepteert een pad als revisie en antwoordt met een echte hash naast twee
+lege kanten; en beide kanten worden nu op grootte gecontroleerd vóór ze gelezen worden, ook de
+HEAD-kant van de live diff, die dat als enige nog niet deed.*
 
 **P11-03 Welk deel van een commit kwam van de agent en welk deel met de hand** 🟢
 *Volgt direct uit P11-01 en is misschien het interessantste ervan. Een bestand dat door de agent

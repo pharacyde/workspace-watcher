@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { appendFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -21,6 +22,10 @@ const WORKSPACE = process.env.WW_WORKSPACE ?? '';
  * this is only the point at which the suite gives up.
  */
 const SCAN_TIMEOUT = 30_000;
+
+/** Identity on the command line rather than in the repository: the machine running this may have
+ * none configured, and a failing commit would look like a UI bug. */
+const IDENTITY = ['-c', 'user.name=smoke', '-c', 'user.email=smoke@example.invalid'];
 
 /** Rows written per batch. Well under maxFileEventsPerScan (200), above which the scanner
  * collapses everything into one BULK row and the feed would gain a single line instead of many. */
@@ -180,6 +185,27 @@ test.describe('workspace-watcher dashboard', () => {
         ],
         { cwd: WORKSPACE },
       );
+    }
+
+    // A submodule, because git collapses a whole repository into one gitlink row and the panel has
+    // to descend into it: a project where all the real work happens inside its submodules otherwise
+    // gets a list of dead-end rows. None of the grouping, folding or descent is visible to a Java
+    // test, and until this fixture existed it was only ever checked by hand against a real
+    // superproject. Its source repository sits beside the workspace rather than inside it, so the
+    // scanner does not see the same files twice.
+    const submoduleSource = join(WORKSPACE, '..', 'submodule-source');
+    if (!existsSync(join(WORKSPACE, 'sub'))) {
+      await mkdir(submoduleSource, { recursive: true });
+      await run('git', ['init', '-q'], { cwd: submoduleSource });
+      await writeFile(join(submoduleSource, 'inner.txt'), 'inner line\n');
+      await run('git', ['add', 'inner.txt'], { cwd: submoduleSource });
+      await run('git', [...IDENTITY, 'commit', '-q', '-m', 'inner'], { cwd: submoduleSource });
+      // protocol.file.allow, because git has refused a submodule over the file protocol since 2.38.
+      // This is a fixture in a temporary directory that this same process created a moment ago, not
+      // a clone of anything that came from somewhere else.
+      const add = ['-c', 'protocol.file.allow=always', 'submodule', 'add', '-q'];
+      await run('git', [...add, submoduleSource, 'sub'], { cwd: WORKSPACE });
+      await run('git', [...IDENTITY, 'commit', '-q', '-m', 'add submodule'], { cwd: WORKSPACE });
     }
 
     page = await browser.newPage();
@@ -448,6 +474,37 @@ test.describe('workspace-watcher dashboard', () => {
     await expect(content).toContainText('line 20', { timeout: SCAN_TIMEOUT });
 
     await search('');
+  });
+
+  test('a submodule lists its own changes, and folds them away again', async () => {
+    await setFollow(false);
+    // Dirty inside the submodule. The superproject's own status says " M sub" and nothing more;
+    // every row behind that one is what the descent exists to show.
+    await appendFile(join(WORKSPACE, 'sub', 'inner.txt'), `changed ${Date.now()}\n`);
+
+    const panel = page.locator('ww-git-panel');
+    const moduleRow = panel.locator('.rowline.submodule').first();
+    await expect(moduleRow).toBeVisible({ timeout: SCAN_TIMEOUT });
+    await expect(moduleRow).toContainText('sub');
+
+    // Listed relative to its module, because the module is named on the row above it.
+    const innerRow = panel.locator('.rowline').filter({ hasText: 'inner.txt' }).first();
+    await expect(innerRow).toBeVisible({ timeout: SCAN_TIMEOUT });
+    // The count is what the fold hides, which is the assertion a "0" over hidden rows fails.
+    await expect(moduleRow.locator('.module-count')).toHaveText(/^[1-9][0-9]*$/);
+
+    await moduleRow.click();
+    await expect(innerRow).toHaveCount(0);
+    await moduleRow.click();
+    await expect(innerRow).toBeVisible();
+
+    // And the file behind it can still be diffed: it lives in the submodule's own object store, so
+    // asking the superproject for it would render it as newly added.
+    await innerRow.click();
+    const diff = page.locator('ww-diff-panel');
+    await expect(diff.locator('h2')).toContainText('Diff');
+    await expect(diff.locator('.monaco-diff-editor')).toBeVisible({ timeout: SCAN_TIMEOUT });
+    await expect(diff.locator('.monaco-diff-editor')).toContainText('inner line');
   });
 
   test('nothing was logged to the console and nothing threw', async () => {

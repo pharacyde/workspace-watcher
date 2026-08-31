@@ -478,11 +478,19 @@ public class GitService {
     }
 
     // Run from that repository root: "HEAD:<path>" is resolved from there, not from the cwd.
-    String head = Shell.run(owner, List.of("git", "show", "HEAD:" + pathInOwner), 15).stdout();
+    //
+    // Through the same size-checked reader the commit sides use. This side was read unbounded
+    // while the working copy right beside it was stat-ed first, so a committed blob too big to
+    // show - a vendored bundle, a checked-in dataset - was that many bytes on the heap before
+    // anything decided it was not going to be shown. It also stops a git that never answered from
+    // being read as "absent at HEAD", which renders the file as newly added: an attribution
+    // invented out of a process that failed to run.
+    Side atHead = side(owner, HEAD, pathInOwner);
+    String head = atHead.text();
 
     String working = "";
-    boolean binary = false;
-    boolean tooLarge = false;
+    boolean binary = isBinary(head);
+    boolean tooLarge = atHead.tooLarge();
     try {
       if (Files.isRegularFile(file)) {
         if (Files.size(file) > props.getMaxDiffBytes()) {

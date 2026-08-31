@@ -513,6 +513,31 @@ class GitServiceTest {
   }
 
   @Test
+  @DisplayName("the HEAD side of a live diff is size-checked too, not only the working copy")
+  void refusesAnOversizedBlobOnTheLiveSide() throws IOException {
+    // The working copy was stat-ed before it was read while HEAD beside it was read unbounded, so
+    // a committed blob too big to show was on the heap in full before anything refused it. Deleted
+    // on disk here, so the working side cannot be the one that trips the limit.
+    Files.writeString(module.resolve("big.txt"), "x".repeat(4096) + "\n");
+    git("add", ".");
+    git("commit", "-m", "big");
+    Files.delete(module.resolve("big.txt"));
+
+    WatcherProperties props = new WatcherProperties();
+    props.setWorkspace(repo.toString());
+    props.setMaxDiffBytes(64);
+    GitService service = new GitService(new ActiveWorkspace(props), props);
+    service.refresh();
+
+    GitService.Versions versions = service.versions("module/big.txt");
+
+    assertThat(versions.tooLarge()).isTrue();
+    assertThat(versions.head()).isEmpty();
+    assertThat(versions.working()).isEmpty();
+    assertThat(versions.live()).isTrue();
+  }
+
+  @Test
   @DisplayName("rejects a revision that would be read as an option by git")
   void rejectsRevisionThatIsAnOption() {
     GitService service = serviceWatching(repo);
