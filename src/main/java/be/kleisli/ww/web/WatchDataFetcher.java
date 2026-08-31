@@ -144,9 +144,9 @@ public class WatchDataFetcher {
    * validating it belongs to {@link GitService}, because only it knows where the root is.
    */
   @DgsQuery
-  public FileVersions fileVersions(@InputArgument String path) {
+  public FileVersions fileVersions(@InputArgument String path, @InputArgument String rev) {
     git.resolveInRepo(path);
-    return mapper.toFileVersions(git.versions(path));
+    return mapper.toFileVersions(git.versions(path, rev));
   }
 
   @DgsQuery

@@ -48,6 +48,20 @@ public class FileChangeService {
   }
 
   /**
+   * Everything about git that can change a diff without changing the file.
+   *
+   * <p>HEAD alone was not enough: a file inside a submodule has its left-hand side resolved in that
+   * submodule, and a commit there leaves the superproject's HEAD, and the file's size and time, all
+   * exactly as they were. The panel kept showing the differences against the previous commit with
+   * the live badge lit - the same failure this guard was written for, one repository down. The
+   * stamp covers both, and is read from what {@link GitService} already holds, so this costs no
+   * process.
+   */
+  private String gitState() {
+    return git.current().head() + "|" + git.stamp();
+  }
+
+  /**
    * Emits the file's present state, then again whenever it changes.
    *
    * <p>Emitting on subscribe costs one message and saves the caller from having to decide whether
@@ -63,7 +77,7 @@ public class FileChangeService {
     }
     AtomicReference<Change> last = new AtomicReference<>();
     // The left-hand side of a diff is `git show HEAD:<path>`, which moves without the file moving.
-    AtomicReference<String> lastHead = new AtomicReference<>(git.current().head());
+    AtomicReference<String> lastHead = new AtomicReference<>(gitState());
     return Flux.concat(
             Flux.defer(
                 () -> {
@@ -82,12 +96,13 @@ public class FileChangeService {
                       // against the previous commit, with the live badge lit over a diff that
                       // could no longer arrive. Read from the snapshot GitService already holds,
                       // so this costs no process.
+                      String state = gitState();
                       if (change == null
-                          && !Objects.equals(git.current().head(), lastHead.get())
+                          && !Objects.equals(state, lastHead.get())
                           && last.get() != null) {
                         change = last.get();
                       }
-                      lastHead.set(git.current().head());
+                      lastHead.set(state);
                       if (change != null) {
                         sink.next(change);
                       }

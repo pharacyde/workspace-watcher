@@ -309,6 +309,9 @@ public class ApiMapper {
         .working(versions.working())
         .binary(versions.binary())
         .tooLarge(versions.tooLarge())
+        .leftRev(versions.leftRev())
+        .rightRev(versions.rightRev())
+        .live(versions.live())
         .build();
   }
 

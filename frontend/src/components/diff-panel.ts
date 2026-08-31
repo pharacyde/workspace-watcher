@@ -99,6 +99,7 @@ export class DiffPanel extends LitElement {
     message: { state: true },
     diffNote: { state: true },
     diffLive: { state: true },
+    diffRev: { state: true },
     wrap: { state: true },
   };
 
@@ -133,6 +134,7 @@ export class DiffPanel extends LitElement {
   /** Why the diff stopped keeping up, when it did. Null while it is in step. */
   declare private diffNote: string | null;
   declare private diffLive: boolean;
+  declare private diffRev: string | null;
   declare private wrap: boolean;
 
   private editor: DiffEditor | null = null;
@@ -175,6 +177,15 @@ export class DiffPanel extends LitElement {
       .clickable {
         cursor: pointer;
         color: var(--text);
+      }
+      /* Same shape as the live badge and deliberately not the same colour: one says the right
+         side keeps changing, the other names two commits that are finished. */
+      .rev {
+        border: 1px solid var(--muted);
+        border-radius: 10px;
+        padding: 0 7px;
+        color: var(--muted);
+        letter-spacing: 0.4px;
       }
       .live {
         border: 1px solid var(--add);
@@ -287,6 +298,7 @@ export class DiffPanel extends LitElement {
     this.message = 'select a row or a file to inspect it';
     this.diffNote = null;
     this.diffLive = false;
+    this.diffRev = null;
     this.wrap = false;
     this.view = 'content';
     this.content = '';
@@ -354,6 +366,7 @@ export class DiffPanel extends LitElement {
     this.diffSubscription = undefined;
     this.diffWatched = null;
     this.diffLive = false;
+    this.diffRev = null;
     // Cleared here rather than only on the next successful watch: a note about the file you just
     // left was rendered under the new file's heading while the new one was still loading.
     this.diffNote = null;
@@ -378,7 +391,6 @@ export class DiffPanel extends LitElement {
     if (this.diffWatched === path) return;
     this.stopWatchingDiff();
     this.diffWatched = path;
-    this.diffLive = true;
     this.diffNote = null;
     // The first message is the file's present state, delivered on subscribe - which is what was
     // just fetched. Refreshing on it would read every file a second time the moment it opens.
@@ -409,6 +421,20 @@ export class DiffPanel extends LitElement {
   }
 
   /**
+   * Says which two revisions are on screen, rather than letting the badge imply it.
+   *
+   * <p>The server falls back to the last commit when nothing is uncommitted, so "live" is no
+   * longer the only answer and cannot be assumed: a diff between two commits will never change,
+   * and a badge claiming otherwise is the kind of quiet untruth this dashboard is built against.
+   * The subscription stays up either way - the moment the file is edited, the answer becomes live
+   * again on its own.
+   */
+  private showVersionsOf(versions: { leftRev: string; rightRev: string; live: boolean }) {
+    this.diffLive = versions.live;
+    this.diffRev = versions.live ? null : `${versions.leftRev || 'nothing'} → ${versions.rightRev}`;
+  }
+
+  /**
    * Re-reads both sides and puts them into the models that are already on screen.
    *
    * <p>The models are updated rather than replaced: a new pair scrolls the editor back to the top,
@@ -434,6 +460,7 @@ export class DiffPanel extends LitElement {
         this.diffNote = 'the file outgrew the diff limit; showing the last version read';
         return;
       }
+      this.showVersionsOf(fileVersions);
       const model = this.editor.getModel();
       if (!model) return;
       const modified = this.editor.getModifiedEditor();
@@ -569,7 +596,10 @@ export class DiffPanel extends LitElement {
         });
         previous?.original.dispose();
         previous?.modified.dispose();
+        // After watchDiff, not before: it starts by tearing the previous watch down, and that
+        // clears the badge along with it - which is how this went out with no badge at all.
         this.watchDiff(requested);
+        this.showVersionsOf(fileVersions);
       })
       .catch((error: Error) => {
         if (this.path !== requested) return;
@@ -760,6 +790,7 @@ export class DiffPanel extends LitElement {
       <h2>
         Diff<span class="note">${this.path ?? ''}</span>
         ${this.diffLive ? html`<span class="live">live</span>` : ''}
+        ${this.diffRev ? html`<span class="rev">${this.diffRev}</span>` : ''}
       </h2>
       <div class="body diff-body">
         ${this.message ? html`<p class="empty">${this.message}</p>` : ''}

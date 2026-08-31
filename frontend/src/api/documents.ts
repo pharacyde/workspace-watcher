@@ -251,13 +251,16 @@ export const HistoryDocument = graphql(`
 `);
 
 export const FileVersionsDocument = graphql(`
-  query FileVersions($path: String!) {
-    fileVersions(path: $path) {
+  query FileVersions($path: String!, $rev: String) {
+    fileVersions(path: $path, rev: $rev) {
       path
       head
       working
       binary
       tooLarge
+      leftRev
+      rightRev
+      live
     }
   }
 `);

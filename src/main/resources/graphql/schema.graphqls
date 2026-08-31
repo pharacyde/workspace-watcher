@@ -148,14 +148,25 @@ the editor needs both documents, not a description of their difference.
 """
 type FileVersions {
   path: String!
-  "Content at HEAD. Empty for an untracked or newly added file."
+  "Left side. Content at HEAD, or at the parent of a commit. Empty when the file did not exist there."
   head: String!
-  "Content on disk right now. Empty for a deleted file."
+  "Right side. Content on disk, or at a commit. Empty for a deleted file."
   working: String!
   "True when the content is not text; both sides are then empty."
   binary: Boolean!
   "True when the file exceeds the diff size limit; both sides are then empty."
   tooLarge: Boolean!
+
+  """
+  Which two revisions the sides actually are, so a viewer never has to assume.
+
+  `HEAD` and `working copy` for uncommitted work; two short hashes for a commit, with an empty
+  left when the commit has no parent. A blank right side is a file that revision did not have.
+  """
+  leftRev: String!
+  rightRev: String!
+  "True only when the right side is the file on disk, and so the only case that keeps changing."
+  live: Boolean!
 }
 
 "Process tree at a moment in time. Sampled, therefore incomplete by nature."
@@ -361,8 +372,17 @@ type Status {
 
 type Query {
   status: Status!
-  "Both sides of a file. The path is as gitStatus reports it, relative to the repository root."
-  fileVersions(path: String!): FileVersions!
+  """
+  Both sides of a file. The path is as gitStatus reports it, relative to the repository root.
+
+  With no revision this is HEAD against the working copy - except when there is nothing
+  uncommitted, in which case it falls back to the commit that last touched the file rather than
+  showing two identical sides. That fallback is why `leftRev`, `rightRev` and `live` exist: the
+  answer says which pair it is instead of leaving the caller to assume the usual one.
+
+  `rev` asks for one commit outright: that commit against its first parent.
+  """
+  fileVersions(path: String!, rev: String): FileVersions!
 
   """
   The regular files one process has open, newest answer each time it is asked.
