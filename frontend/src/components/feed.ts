@@ -85,7 +85,7 @@ function label(source: Source, type: string): string {
  * nothing to what the first one said. A counter says the same thing in one line and keeps the row
  * where the reader last saw it.
  */
-type Row = { event: Event; repeats: number };
+type Row = { event: Event; repeats: number; missedBefore: number };
 
 /**
  * Folds a run of identical events into one row.
@@ -94,19 +94,38 @@ type Row = { event: Event; repeats: number };
  * keeps the order of the chronicle intact - a collapsed row still sits exactly where its first
  * event happened, and never absorbs something that happened after a different event.
  */
-function collapse(events: Event[]): Row[] {
+function collapse(events: Event[], gaps: ReadonlyMap<number, number>): Row[] {
   const rows: Row[] = [];
+  let missed = 0;
+  let previousSeq = 0;
   for (const event of events) {
+    const seq = Number(event.seq);
+    missed += missedBetween(gaps, previousSeq, seq);
+    previousSeq = seq;
     const last = rows[rows.length - 1];
-    if (last && sameRow(last.event, event)) {
+    // A gap never folds into the row before it: a counter of "the same thing" would hide it.
+    if (last && missed === 0 && sameRow(last.event, event)) {
       // The newest one is kept, so the timestamp on the row is when it last happened.
       last.event = event;
       last.repeats++;
     } else {
-      rows.push({ event, repeats: 1 });
+      rows.push({ event, repeats: 1, missedBefore: missed });
+      missed = 0;
     }
   }
   return rows;
+}
+
+/**
+ * Events lost between two that are shown. The gap is recorded on the seq that followed it, and
+ * the filters may have hidden that one, so every gap since the previous visible event counts.
+ */
+function missedBetween(gaps: ReadonlyMap<number, number>, after: number, upTo: number): number {
+  let total = 0;
+  for (const [seq, missed] of gaps) {
+    if (seq > after && seq <= upTo) total += missed;
+  }
+  return total;
 }
 
 /**
@@ -214,6 +233,16 @@ export class Feed extends LitElement {
       }
       .agent {
         color: var(--dim);
+      }
+      /* A loss gets its own line above the row that followed it, in the colour of a warning:
+         the point is that a feed which looks complete says where it is not. */
+      .rowline:has(.gap) {
+        flex-wrap: wrap;
+      }
+      .gap {
+        flex-basis: 100%;
+        color: var(--warn);
+        font-size: 11px;
       }
       /* A call out to another system, or a handover to another agent, should not read the same as
          editing a file two lines above it. */
@@ -536,7 +565,7 @@ export class Feed extends LitElement {
     // guess of exactly the kind this project refuses to make elsewhere.
     const needle = this.search.toLowerCase();
     const result = items.filter((event) => matches(event, this.hidden_, this.session, needle));
-    const rows = collapse(result);
+    const rows = collapse(result, this.replay ? new Map() : this.log.gaps);
     this.cache = {
       items,
       hidden: this.hidden_,
@@ -666,6 +695,13 @@ export class Feed extends LitElement {
             new CustomEvent('event-selected', { detail: event, bubbles: true, composed: true }),
           )}
       >
+        ${row.missedBefore > 0
+          ? html`<span
+              class="gap"
+              title="seq jumped: the server dropped these for this tab because it was not keeping up"
+              >⚠ ${row.missedBefore} event${row.missedBefore === 1 ? '' : 's'} not received</span
+            >`
+          : ''}
         <span class="ts">${clock(event.ts)}</span>
         <span class="tag ${event.source}">${label(event.source, event.type)}</span>
         <span class="msg ${this.wrap ? '' : 'ellipsis'}">

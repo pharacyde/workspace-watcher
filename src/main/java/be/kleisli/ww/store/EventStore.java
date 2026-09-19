@@ -76,6 +76,11 @@ public class EventStore {
   private final BlockingQueue<Stored> pending = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
   private final AtomicLong dropped = new AtomicLong();
 
+  /** What flush() last saw of the drop counter, and whether the current run has been announced. */
+  private long droppedAtLastFlush;
+
+  private boolean announcedDrops;
+
   /**
    * Volatile: written by open() and by the disable path when a migration did not take, and read
    * without the lock by enabled() from GraphQL threads.
@@ -94,6 +99,11 @@ public class EventStore {
 
   public boolean enabled() {
     return connection != null;
+  }
+
+  /** Events that never reached the database because the write queue was full. */
+  public long dropped() {
+    return dropped.get();
   }
 
   @PostConstruct
@@ -179,6 +189,30 @@ public class EventStore {
     }
   }
 
+  /**
+   * Says once per run of drops that the archive is incomplete, from the flush thread rather than
+   * from the collector that hit the full queue; the notice is published after the drain, so it is
+   * itself recorded (P12-02, the shape of SLOW_SCAN).
+   */
+  private void announceDrops() {
+    long total = dropped.get();
+    if (total == droppedAtLastFlush) {
+      announcedDrops = false;
+      return;
+    }
+    droppedAtLastFlush = total;
+    if (announcedDrops) {
+      return;
+    }
+    announcedDrops = true;
+    bus.publish(
+        WatchEvent.of(WatchEvent.Source.SYSTEM, "HISTORY_DROPPED")
+            .summary(
+                "history is incomplete: "
+                    + total
+                    + " event(s) so far were not recorded because the write queue was full"));
+  }
+
   /*
    * Everything below that touches `connection` is synchronized. One SQLite connection is shared by
    * the flush, the hourly prune, the process sampler and every GraphQL query thread, and a JDBC
@@ -219,11 +253,15 @@ public class EventStore {
 
   @Scheduled(fixedDelayString = "${watcher.history-flush-ms:500}")
   public synchronized void flush() {
-    if (connection == null || pending.isEmpty()) {
+    if (connection == null) {
       return;
     }
     List<Stored> batch = new ArrayList<>(pending.size());
     pending.drainTo(batch);
+    announceDrops();
+    if (batch.isEmpty()) {
+      return;
+    }
     try (PreparedStatement statement =
         connection.prepareStatement(
             """

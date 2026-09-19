@@ -32,6 +32,7 @@ public class EventBus {
   private static final int SUBSCRIBER_BUFFER = 4096;
 
   private final AtomicLong seq = new AtomicLong();
+  private final AtomicLong dropped = new AtomicLong();
   private final Deque<WatchEvent> history = new ArrayDeque<>();
   private final List<Consumer<WatchEvent>> subscribers = new CopyOnWriteArrayList<>();
   private final int historySize;
@@ -129,8 +130,18 @@ public class EventBus {
             FluxSink.OverflowStrategy.BUFFER)
         .onBackpressureBuffer(
             SUBSCRIBER_BUFFER,
-            dropped -> log.warn("subscriber too slow; dropped event seq={}", dropped.seq()),
+            lost -> {
+              // Counted as well as logged: a reader can ask Status.loss, and the gap in seq the
+              // subscriber sees says where (P12-02).
+              dropped.incrementAndGet();
+              log.warn("subscriber too slow; dropped event seq={}", lost.seq());
+            },
             BufferOverflowStrategy.DROP_OLDEST);
+  }
+
+  /** Events some live subscriber never received because it was not keeping up. */
+  public long droppedForSlowSubscribers() {
+    return dropped.get();
   }
 
   public Runnable subscribe(Consumer<WatchEvent> subscriber) {

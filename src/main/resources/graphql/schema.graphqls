@@ -351,6 +351,17 @@ type LimitSnapshot {
   windows: [LimitWindow!]!
 }
 
+"""
+Events the watcher dropped on purpose rather than hold a collector up. Both are counts since
+start; the feed marks a stream loss where it happened, by the gap in `seq`.
+"""
+type Loss {
+  "Never reached the history database: its write queue was full."
+  history: Float!
+  "Never reached some live subscriber: it was not keeping up, and the oldest were dropped."
+  stream: Float!
+}
+
 type Status {
   "Null until a workspace has been chosen or discovered."
   workspace: String
@@ -366,6 +377,8 @@ type Status {
   buildId: String!
   "Transcript directories being tailed. Empty means nothing will be attributed to an agent."
   transcriptDirs: [String!]!
+  "What the watcher itself has let fall, so a feed that looks complete can say when it is not."
+  loss: Loss!
   git: GitSnapshot!
   processes: ProcessSnapshot!
 }

@@ -12,6 +12,10 @@ export const StatusDocument = graphql(`
       os
       buildId
       transcriptDirs
+      loss {
+        history
+        stream
+      }
     }
   }
 `);

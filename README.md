@@ -144,7 +144,7 @@ GraphQL is the entire API — there is no REST surface. Queries go over HTTP POS
 the live feed is a `graphql-ws` subscription on the same path.
 
 ```graphql
-{ status { workspace transcriptDirs
+{ status { workspace transcriptDirs loss { history stream }
            git { branch files { path status } }
            processes { total roots { pid command children { pid command } } } } }
 

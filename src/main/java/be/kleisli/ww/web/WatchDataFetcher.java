@@ -14,6 +14,7 @@ import be.kleisli.ww.generated.types.FileVersions;
 import be.kleisli.ww.generated.types.GitSnapshot;
 import be.kleisli.ww.generated.types.GuardConfig;
 import be.kleisli.ww.generated.types.GuardDecision;
+import be.kleisli.ww.generated.types.Loss;
 import be.kleisli.ww.generated.types.ProcessSnapshot;
 import be.kleisli.ww.generated.types.SessionEntry;
 import be.kleisli.ww.generated.types.Status;
@@ -132,6 +133,10 @@ public class WatchDataFetcher {
         .os(System.getProperty("os.name"))
         .buildId(buildId)
         .transcriptDirs(transcripts.watchedTranscripts())
+        .loss(
+            Loss.newBuilder().history((double) store.dropped()).stream(
+                    (double) eventBus.droppedForSlowSubscribers())
+                .build())
         .git(mapper.toGitSnapshot(git.current()))
         .processes(mapper.toProcessSnapshot(processes.currentSnapshot()))
         .build();

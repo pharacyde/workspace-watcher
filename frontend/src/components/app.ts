@@ -21,6 +21,7 @@ export class App extends LitElement {
   static properties = {
     workspace: { state: true },
     hasTranscripts: { state: true },
+    lost: { state: true },
     selected: { state: true },
     selectedEvent: { state: true },
     selectedProcess: { state: true },
@@ -31,6 +32,7 @@ export class App extends LitElement {
 
   declare private workspace: string;
   declare private hasTranscripts: boolean;
+  declare private lost: number;
   declare private selected: string | null;
   declare private selectedEvent: unknown | null;
   declare private selectedProcess: unknown | null;
@@ -127,6 +129,7 @@ export class App extends LitElement {
     super();
     this.workspace = 'connecting…';
     this.hasTranscripts = true;
+    this.lost = 0;
     this.selected = null;
     this.selectedEvent = null;
     this.selectedProcess = null;
@@ -185,6 +188,7 @@ export class App extends LitElement {
         this.workspace = status.workspace ?? 'waiting for an agent to show a workspace…';
         titleWorkspace(status.workspace ?? null);
         this.hasTranscripts = status.transcriptDirs.length > 0;
+        this.lost = status.loss.history + status.loss.stream;
       })
       .catch(() => (this.workspace = 'backend unreachable'));
   }
@@ -246,6 +250,13 @@ export class App extends LitElement {
               title="File events still work, but nothing will be attributed to an agent."
               >no agent transcripts</span
             >`}
+        ${this.lost > 0
+          ? html`<span
+              class="pill warn"
+              title="Events the watcher dropped since it started rather than hold a collector up: the history and the live feed are incomplete. The feed marks where."
+              >${this.lost} dropped</span
+            >`
+          : ''}
       </header>
       <ww-timeline></ww-timeline>
       <main>

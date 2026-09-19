@@ -46,6 +46,11 @@ export class LatestController<TResult> implements ReactiveController {
  */
 export class EventLogController<TItem extends { seq: string }> implements ReactiveController {
   items: TItem[] = [];
+  /**
+   * Arrivals whose seq skipped ahead: seq is contiguous on the server, so a jump is exactly how
+   * many events this subscriber never received (P12-02). Keyed by the seq that came after the gap.
+   */
+  gaps: Map<number, number> = new Map();
   /** While paused, arrivals are held rather than dropped: unpausing shows what was missed. */
   paused = false;
   private pending: TItem[] = [];
@@ -65,6 +70,10 @@ export class EventLogController<TItem extends { seq: string }> implements Reacti
     this.unsubscribe = subscribe(this.document, (data) => {
       const seq = Number(data.events.seq);
       if (seq <= this.lastSeq) return;
+      // Not from zero: the first arrival is wherever the server's buffer starts, not a loss.
+      if (this.lastSeq > 0 && seq > this.lastSeq + 1) {
+        this.gaps.set(seq, seq - this.lastSeq - 1);
+      }
       this.lastSeq = seq;
       this.pending.push(data.events);
       if (this.paused) {
@@ -84,6 +93,7 @@ export class EventLogController<TItem extends { seq: string }> implements Reacti
   reset(): void {
     this.items = [];
     this.pending = [];
+    this.gaps = new Map();
     this.lastSeq = 0;
     this.host.requestUpdate();
   }
@@ -123,6 +133,10 @@ export class EventLogController<TItem extends { seq: string }> implements Reacti
     this.pending = [];
     if (this.items.length > this.limit) {
       this.items = this.items.slice(this.items.length - this.limit);
+      const oldest = Number(this.items[0].seq);
+      for (const seq of this.gaps.keys()) {
+        if (seq < oldest) this.gaps.delete(seq);
+      }
     }
     this.host.requestUpdate();
   }

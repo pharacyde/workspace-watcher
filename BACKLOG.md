@@ -317,7 +317,7 @@ bestand al incrementeel leest. De timeline pollt elke 5 s, usage elke 15 s, per 
 incrementeel lezen vanaf de laatste offset, en `forCosting()` één keer per query in plaats van drie.
 Daarnaast: de cache heeft geen cap en wordt bij een workspace-wissel nooit geleegd.*
 
-**P11-05 Verlies is onzichtbaar voor wie kijkt** 🟢
+**P11-05 Verlies is onzichtbaar voor wie kijkt** ✅ — als P12-02
 *Beide dropwegen - de per-abonnee buffer in `EventBus` en de queue van `EventStore` - loggen alleen
 aan de serverkant. Het schema heeft geen teller, en de client filtert op `seq <= lastSeq`, wat een
 gat niet van normale voortgang onderscheidt. Voor een project dat expliciet tegen stille onjuistheid
@@ -720,7 +720,7 @@ overschrijven. Het is dus geen pin maar een beginwaarde. Óf het gedrag klopt en
 de tekst klopt en een expliciet gezette workspace hoort latere wissels te weigeren. Nu is het geen
 van beide, en dat is de variant die iemand een uur zoeken kost.*
 
-**P12-02 Laat zien wat de watcher zelf laat vallen** 🟢
+**P12-02 Laat zien wat de watcher zelf laat vallen** ✅
 *`EventStore` laat de nieuwste events vallen als de wachtrij vol loopt in plaats van een collector op
 te houden — dat is de juiste keuze en staat als invariant. Maar de teller gaat alleen naar het
 logbestand: `dropped` komt nul keer voor in `schema.graphqls`, dus het dashboard kan het niet weten.
@@ -729,6 +729,16 @@ dezelfde fout als een kostentotaal dat één model overslaat en dat niet zegt, e
 project bewust wél opgelost. `Status` heeft al `transcriptDirs` om te zeggen of laag 1 leeft; een
 `droppedEvents` ernaast is dezelfde soort waarheid. De feed hoort het zichtbaar te maken op het
 moment dat het gebeurt, niet pas als iemand het logbestand opent.*
+
+*Gedaan, op drie plaatsen. `Status.loss { history, stream }` telt beide dropwegen sinds de start;
+`EventStore.flush` publiceert één `HISTORY_DROPPED`-event per reeks drops (ná het leegmaken, zodat
+de melding zelf in het archief zit, en vanaf de flush-thread in plaats van de collector die tegen
+de muur liep); en de browser markeert streamverlies op de plek zelf, want `seq` is aaneengesloten
+en een sprong is exact het aantal dat deze tab miste - een gele regel boven de rij die erop volgde,
+die nooit wegvouwt in een ×N-teller. Een pil in de header zegt het totaal. Gemeten in de browsertest
+met een socket die drie events per seq laat vallen: één marker met "3". Gevonden onderweg: de feed
+en het notificatiepaneel zitten elk op `events`, dus drie *frames* droppen was maar één event voor
+de feed - dat is P11-07 in de praktijk.*
 
 **P12-03 Wat de watcher zichzelf kost, op het dashboard** 🟡
 *Zie P15-01 hieronder: scan-ms, kindproces-ms en spool-latentie zijn goedkoop meetbaar en horen in

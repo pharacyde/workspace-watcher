@@ -179,6 +179,18 @@ was measured and lost. It is not a description of what the collectors do.
 
 ## Storage and the timeline
 
+- **Loss is said, in three places, and never invented.** Both drop paths - `EventStore.record`
+  when the write queue is full, `EventBus.stream` when a subscriber does not keep up - used to log
+  only, so a feed could look complete and not be (P12-02). Now: `Status.loss { history, stream }`
+  counts both since start; `EventStore.flush` publishes one `HISTORY_DROPPED` SYSTEM event per run
+  of drops, after the drain so the notice itself is archived, and from the flush thread rather
+  than the collector that hit the wall; and the browser marks a stream loss where it happened,
+  because `seq` is contiguous and `EventLogController` turns a jump into a gap on the row that
+  followed (`Feed.collapse` never folds across one, and hidden rows carry their gap forward).
+  Measured with a lossy socket in the browser test: three events dropped by seq, one marker
+  saying three. Dropped by seq and not by frame there, because the feed and the notification
+  panel each subscribe to `events` and every event crosses the socket twice (P11-07).
+
 - **The (workspace, id) index is load-bearing.** The common query is "the most recent N for this
   workspace", which orders by id; the (workspace, ts) index cannot serve that ordering. Measured
   over 500k rows: 328ms without it, 1ms with. It costs about 18% of write throughput and 28% of

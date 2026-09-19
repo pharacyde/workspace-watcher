@@ -88,6 +88,9 @@ class EventBusTest {
         .assertNext(e -> assertThat(e.summary()).startsWith("flood-"))
         .thenCancel()
         .verify(java.time.Duration.ofSeconds(10));
+    // And the loss is counted, not only logged: 10,000 published into a buffer of 4096 leaves
+    // exactly this many that no reader will ever see.
+    assertThat(bus.droppedForSlowSubscribers()).isEqualTo(10_000 - 4096);
   }
 
   @Test

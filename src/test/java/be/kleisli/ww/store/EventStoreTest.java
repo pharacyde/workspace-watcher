@@ -52,6 +52,45 @@ class EventStoreTest {
   }
 
   @Test
+  @DisplayName("a full write queue is counted, said once per run of drops, and the notice is kept")
+  void countsAndAnnouncesDrops() {
+    Wiring w = open();
+    // Counted by a subscriber rather than read from replay(): the bus keeps 2,000 and each burst
+    // below is ten times that, so the first notice would be gone from it by the second.
+    List<WatchEvent> notices = new java.util.ArrayList<>();
+    w.bus()
+        .subscribe(
+            e -> {
+              if (e.type().equals("HISTORY_DROPPED")) {
+                notices.add(e);
+              }
+            });
+    // One more than the queue holds, with no flush in between: the last one has nowhere to go.
+    for (int i = 0; i <= 20_000; i++) {
+      publish(w.bus(), "burst-" + i);
+    }
+    assertThat(w.store().dropped()).isEqualTo(1);
+
+    w.store().flush();
+    assertThat(notices).hasSize(1);
+    assertThat(notices.get(0).summary()).contains("1 event(s)");
+    // The notice itself made it into the archive: the history says where it is incomplete.
+    w.store().flush();
+    assertThat(w.store().history(workspace.toString(), null, null, 30_000))
+        .extracting(EventStore.Stored::type)
+        .contains("HISTORY_DROPPED");
+
+    // Quiet flushes do not repeat it; a new run of drops does.
+    w.store().flush();
+    assertThat(notices).hasSize(1);
+    for (int i = 0; i <= 20_000; i++) {
+      publish(w.bus(), "again-" + i);
+    }
+    w.store().flush();
+    assertThat(notices).hasSize(2);
+  }
+
+  @Test
   @DisplayName("records what the bus publishes and reads it back oldest first")
   void recordsAndReadsBack() {
     Wiring w = open();

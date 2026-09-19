@@ -532,6 +532,49 @@ test.describe('workspace-watcher dashboard', () => {
     await expect(diff.locator('.monaco-diff-editor')).toContainText('inner line');
   });
 
+  test('events the socket never delivered are marked in the feed where they are missing', async () => {
+    // The server drops the oldest events for a subscriber that does not keep up, and seq is
+    // contiguous, so a jump in seq is exactly how many this tab missed. A browser cannot be made
+    // slow on cue, but the socket can be made lossy: server-to-client `events` frames are dropped
+    // here at the transport, which is what the feed sees in both cases.
+    // Dropped by seq rather than by frame: the feed and the notification panel each subscribe to
+    // `events`, so every event crosses the socket twice and three frames are not three events.
+    let toDrop = 0;
+    const dropped = new Set<string>();
+    await page.routeWebSocket(/\/graphql/, (ws) => {
+      const server = ws.connectToServer();
+      ws.onMessage((message) => server.send(message));
+      server.onMessage((message) => {
+        if (typeof message === 'string' && message.includes('"events"')) {
+          const seq = /"seq":"(\d+)"/.exec(message)?.[1];
+          if (seq && (dropped.has(seq) || (toDrop > 0 && dropped.size < toDrop))) {
+            dropped.add(seq);
+            return;
+          }
+        }
+        ws.send(message);
+      });
+    });
+    // The route applies to sockets opened after it; the page's are older.
+    await page.reload();
+    await expect.poll(feedCount, { timeout: SCAN_TIMEOUT }).toBeGreaterThan(0);
+    await setFollow(true);
+
+    const before = await feedCount();
+    toDrop = 3;
+    await writeBatch('theta', 5);
+    await expect.poll(() => dropped.size, { timeout: SCAN_TIMEOUT }).toBe(3);
+    await waitForNewEvents(before);
+
+    const gap = page.locator('ww-feed .rowline .gap');
+    await expect(gap.first()).toBeVisible({ timeout: SCAN_TIMEOUT });
+    await expect(gap.first()).toHaveText(/3 events not received/);
+
+    await page.unrouteAll();
+    await page.reload();
+    await expect.poll(feedCount, { timeout: SCAN_TIMEOUT }).toBeGreaterThan(0);
+  });
+
   test('nothing was logged to the console and nothing threw', async () => {
     expect(pageErrors, 'unhandled page errors').toEqual([]);
     expect(consoleErrors, 'console errors').toEqual([]);
