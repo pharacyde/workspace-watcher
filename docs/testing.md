@@ -39,3 +39,7 @@ looking green. `mvn -DskipTests package` first, or the run means nothing. CI tak
 JDK 27 build uploaded for exactly that reason, and runs the browser test once on one runner rather
 than in every matrix combination — the bundle does not vary by JDK, and the browser download does
 not need paying for twice.
+
+**Token-shaped fixtures are assembled, not written out.** GitHub's push protection reads a test file
+the way `SensitiveContentScanner` reads a payload: `"AKIA" + "…"` and `"xoxb-" + "…"` in
+`SensitiveContentScannerTest` exist because the literal forms had the push to `main` refused.

@@ -23,6 +23,10 @@ directory, but Maven only ever copies into `target/classes`, so a bundle that di
 source stayed there and was packaged forever after: measured at 1294 asset files for the 30 that
 belong, and a 97 MB jar that is 52 MB once they are gone.
 
+After pulling a change to `node.version` in `pom.xml`, `rm -rf frontend/node` once. The plugin
+extracts the new node tarball *over* the old directory, and npm 11's files on top of npm 10's nested
+modules crashed `npm ci` with `Class extends value undefined` (measured on the v22 → v24 bump).
+
 Run it from a **copy** of the jar, not from `target/` itself. A Spring Boot fat jar is read lazily
 - nested jars stay compressed until a class is first needed - so rebuilding while the app runs
 pulls the file out from under the running JVM. It does not fail at once: the pages already served

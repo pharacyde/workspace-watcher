@@ -353,6 +353,15 @@ dan ook staan.*
 *De entry-bundel is 149 kB raw / 40,5 kB gzipped, niet 82/25. En de hook was 21 ms, niet 5. Allebei
 rechtgezet; het argument tegen React blijft overeind, alleen het getal was verouderd.*
 
+**P11-14 De prune deelt zijn slot met de flush** 🟡 — vermoed, niet gemeten
+*`EventStore.prune` (elk uur, `DELETE … ORDER BY id DESC LIMIT 1 OFFSET ?`) is `synchronized` met
+`flush()`. Op een tabel van 400 MB en 30 dagen is de duur ervan niet gemeten; als het seconden zijn,
+loopt de schrijfwachtrij van 20.000 vol en dat is precies het verlies dat P12-02 nu zichtbaar maakt.
+Meten op een kopie van de database; boven 500 ms: verwijderen in batches van 5000 buiten het slot,
+zoals `redactHistory` al doet. Uit dezelfde scan, ook vermoed: `TranscriptTailService` leest tot 8 MB
+per bestand per tick en `split("\n")` dat in geheugen; en de time-out van `lsof` (20 s) kan één van
+de vier scheduler-threads 20 s vasthouden op een hangende mount.*
+
 **P11-12 De JVM houdt 1,2 GB vast voor 35 MB aan data** ✅ (de vlag) / 🟢 (`lsof` met open tab)
 *Gemeten op 19 sep 2026 na vijf minuten draaien: RSS 1,42 GB, heap committed 1,17 GB, maar na een
 geforceerde full GC nog 35 MB live. Er staat geen `-Xmx`, dus G1 neemt een kwart van het geheugen
@@ -423,6 +432,28 @@ eronder een tweede keer op onder een verdubbeld pad; `git status` draait met
 die op dat moment commit faalt, en dat is invariant 1 gebroken door de waarnemer zelf; en
 `resolveInRepo` real-pathed nu, want `normalize()` is lexicaal en liet een symlink de repository
 uit wijzen op een server zonder authenticatie.*
+
+**P10-24 Zes kleine bevindingen uit de bugscan van 19 sep** 🟢 *(elk een uur of minder)*
+*Waar, nog niet gefixt, gerangschikt op wat het kost als het misgaat. (1) `HookSpoolService.drain`
+verwijdert een spoolbestand ook als het lezen een `IOException` gaf - het event is dan weg zonder
+spoor; de atomaire rename maakt het zeldzaam, niet onmogelijk. (2) `EventStore.history/activity/prune`
+vergelijken `ts` als tekst en `Instant.toString()` laat een nul-fractie weg (`…:05Z` tegen
+`…:05.200Z`, en `Z` > `.`), dus rijen binnen de grensseconde kunnen verkeerd vallen. (3)
+`UsageService.activity` ziet alleen de laatste zeven dagen (`RECENT_SECONDS`), dus de token-tijdlijn
+is leeg voor oudere vensters terwijl de event-dichtheid dat niet is. (4) `GuardService.check` leest
+`config` twee keer; een `save()` ertussen kan DENIED loggen en WARN teruggeven. (5) `Shell.run`
+meldt -1 voor een proces dat precies op de time-out slaagde. (6) `WatchDataFetcher.properties` wordt
+geïnjecteerd en nooit gelezen. Daarnaast: README regel 101-105 is een verhaspelde alinea
+("Older text, kept for the shape of the argument") die herschreven moet worden.*
+
+**P10-25 Zestig lange commentaarblokken horen in de docs** 🟢
+*Regel sinds 19 sep: code draagt hooguit drie regels *waarom*, de meting en de geschiedenis staan in
+`docs/*.md` met de klasse erbij. De docs-doorloop van die dag deed dat voor de blokken van die dag
+zelf en telde wat er nog staat: ~62 blokken van acht regels of meer in Java (`AccountLimits:19` met
+17, `GitService:257` met 17, `EventBus:94` met 15…), drie in de hook-scripts (de kop van
+`workspace-watcher-hook.sh` is 36 regels) en ~25 in TypeScript (`diff-panel.ts`, `feed.ts`,
+`timeline.ts`). Per bestand doen, met een docs-bullet die de methode noemt; het is verplaatsen, geen
+herschrijven, en de tests raken het niet.*
 
 **P10-17 In een jar of zip kijken vanuit het procesdetail** 🟢 *(gevraagd tijdens gebruik)*
 *Een proces houdt zijn eigen jar of zip open, en daar houdt het paneel nu op: de tail antwoordt
