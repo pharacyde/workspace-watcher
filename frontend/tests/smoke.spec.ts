@@ -309,12 +309,21 @@ test.describe('workspace-watcher dashboard', () => {
       .poll(async () => buttonLabel('follow'), { message: 'scrolling up should stop following' })
       .toBe('⤓ follow off');
 
+    // The label flips on the wheel event, which fires before the browser has scrolled; reading
+    // the position now measured the bottom and then failed by exactly the wheel delta - which is
+    // also what a re-pin would produce. Wait for the scroll to land first, so the two cannot be
+    // confused, and check at the end that the view is genuinely away from the bottom.
+    await expect
+      .poll(tailGap, { message: 'the wheel scroll never landed' })
+      .toBeGreaterThan(100);
+
     // And it has to stay put: a new row arriving must not yank the reader back down.
     const where = (await feedMetrics()).scrollTop;
     const before = await feedCount();
     await writeBatch('zeta', 5);
     await waitForNewEvents(before);
     expect(Math.abs((await feedMetrics()).scrollTop - where)).toBeLessThan(8);
+    expect(await tailGap()).toBeGreaterThan(100);
 
     await setFollow(true);
   });
@@ -327,6 +336,22 @@ test.describe('workspace-watcher dashboard', () => {
     // and the feed sat 940 px short of the end.
     for (const wrapped of [true, false]) {
       await setWrap(wrapped);
+      // The rows already on screen, not only the ones that arrive next: the virtualizer re-renders
+      // rows only when its renderItem changes by reference, so a stable one leaves these as they
+      // were while every newly scrolled-in row obeys the toggle.
+      await expect
+        .poll(
+          () =>
+            page
+              .locator('ww-feed .rowline')
+              .evaluateAll(
+                (rows, on) =>
+                  rows.length > 0 && rows.every((r) => r.classList.contains('wrapped') === on),
+                wrapped,
+              ),
+          { message: `rows already on screen did not follow wrap ${wrapped ? 'on' : 'off'}` },
+        )
+        .toBe(true);
       const before = await feedCount();
       await writeBatch(wrapped ? 'delta' : 'epsilon');
       await waitForNewEvents(before);

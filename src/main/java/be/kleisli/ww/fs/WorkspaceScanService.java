@@ -40,7 +40,19 @@ public class WorkspaceScanService {
 
   private static final Logger log = LoggerFactory.getLogger(WorkspaceScanService.class);
 
-  private record Stamp(long size, long modified) {}
+  record Stamp(long size, long modified) {}
+
+  /** What moved between two snapshots; the three lists are disjoint. */
+  record Diff(List<Path> created, List<Path> modified, List<Path> deleted) {
+
+    int total() {
+      return created.size() + modified.size() + deleted.size();
+    }
+
+    boolean isEmpty() {
+      return total() == 0;
+    }
+  }
 
   private final WatcherProperties props;
   private final ActiveWorkspace active;
@@ -93,134 +105,157 @@ public class WorkspaceScanService {
       return;
     }
     if (!root.equals(baselineFor)) {
-      // Workspace changed underneath us; the old snapshot describes a different tree entirely.
-      previous = null;
-      baselineFor = root;
-      nextScanAt = 0;
-      noticedSlow = false;
-      // Belongs to the tree that was left behind. Kept, it would label the first ordinary save in
-      // the returned-to workspace as a live log, and it would grow with every switch.
-      growthRuns.clear();
+      rebase(root);
     }
     if (System.currentTimeMillis() < nextScanAt) {
       return;
     }
-    Map<Path, Stamp> current;
     long startedAt = System.nanoTime();
     try {
-      current = snapshot(root);
+      round(root, startedAt);
     } catch (IOException e) {
       log.debug("workspace scan failed: {}", e.toString());
-      pace(startedAt);
-      return;
     }
+    pace(startedAt);
+  }
+
+  /** Workspace changed underneath us; the old snapshot describes a different tree entirely. */
+  private void rebase(Path root) {
+    previous = null;
+    baselineFor = root;
+    nextScanAt = 0;
+    noticedSlow = false;
+    // Belongs to the tree that was left behind. Kept, it would label the first ordinary save in
+    // the returned-to workspace as a live log, and it would grow with every switch.
+    growthRuns.clear();
+  }
+
+  /** One round: snapshot, notice a slow tree once, then either baseline or diff and publish. */
+  private void round(Path root, long startedAt) throws IOException {
+    Map<Path, Stamp> current = snapshot(root);
     long walkMs = (System.nanoTime() - startedAt) / 1_000_000;
-    // Paced at the end of the round rather than here, because the walk is no longer the expensive
-    // half: `git.refresh()` below starts five git processes, measured at 57ms in this repository
-    // and more on a large one, and pacing on the walk alone left that outside the budget entirely -
-    // the duty cycle promised a tenth of a core and was silently spending more.
-    long interval = Math.max(props.getFsPollMs(), walkMs * DUTY_CYCLE_DIVISOR);
+    noticeSlowScan(root, current.size(), walkMs);
 
-    if (interval > SLOW_SCAN_NOTICE_MS && !noticedSlow) {
-      noticedSlow = true;
-      // Said out loud rather than hidden: on a tree this size the file layer reports changes in
-      // batches of seconds. Agent attribution is unaffected - that comes from transcripts and
-      // hooks, which are cheap and exact.
-      bus.publish(
-          WatchEvent.of(WatchEvent.Source.SYSTEM, "SLOW_SCAN")
-              .summary(
-                  current.size()
-                      + " files take "
-                      + walkMs
-                      + "ms to scan; file events will lag by up to "
-                      + interval / 1000
-                      + "s")
-              .path(root.toString()));
-    }
-
-    if (previous == null) {
+    Map<Path, Stamp> before = previous;
+    previous = current;
+    if (before == null) {
       // First pass only establishes the baseline; replaying the whole tree as "created"
       // would bury the session's real activity.
-      previous = current;
       bus.publish(
           WatchEvent.of(WatchEvent.Source.SYSTEM, "BASELINE")
               .summary("watching " + root + " (" + current.size() + " files)")
               .path(root.toString()));
       git.refresh();
-      pace(startedAt);
       return;
     }
 
-    List<Path> created = new ArrayList<>();
-    List<Path> modified = new ArrayList<>();
-    List<Path> deleted = new ArrayList<>();
-    for (Map.Entry<Path, Stamp> entry : current.entrySet()) {
-      Stamp before = previous.get(entry.getKey());
-      if (before == null) {
-        created.add(entry.getKey());
-      } else if (!before.equals(entry.getValue())) {
-        modified.add(entry.getKey());
-        if (entry.getValue().size() > before.size()) {
-          growthRuns.merge(entry.getKey(), 1, Integer::sum);
-        } else {
-          growthRuns.put(entry.getKey(), 0);
-        }
-      } else {
-        // Unchanged: whatever was writing to it has stopped, so it is no longer a live log.
-        growthRuns.remove(entry.getKey());
-      }
-    }
-    for (Path gone : previous.keySet()) {
-      if (!current.containsKey(gone)) {
-        deleted.add(gone);
-        growthRuns.remove(gone);
-      }
-    }
-
-    previous = current;
-    int total = created.size() + modified.size() + deleted.size();
-    if (total == 0) {
+    Diff diff = diff(before, current);
+    trackGrowth(before, current, diff);
+    if (diff.isEmpty()) {
       // Nothing in the tree moved, but git itself may have: a commit leaves every file exactly as
       // it was, and without this the working tree panel kept listing what had just been committed.
       git.refreshIfGitChanged();
-      pace(startedAt);
       return;
     }
+    publish(root, diff);
+    git.refresh();
+  }
 
-    if (total > props.getMaxFileEventsPerScan()) {
+  /**
+   * Says once, out loud, that the file layer on this tree is coarse.
+   *
+   * <p>Judged on the walk alone, which is the interval the duty cycle would derive from it; the
+   * actual pacing is set from the whole round in {@link #pace}. Agent attribution is unaffected -
+   * that comes from transcripts and hooks, which are cheap and exact.
+   */
+  private void noticeSlowScan(Path root, int files, long walkMs) {
+    long interval = Math.max(props.getFsPollMs(), walkMs * DUTY_CYCLE_DIVISOR);
+    if (interval <= SLOW_SCAN_NOTICE_MS || noticedSlow) {
+      return;
+    }
+    noticedSlow = true;
+    bus.publish(
+        WatchEvent.of(WatchEvent.Source.SYSTEM, "SLOW_SCAN")
+            .summary(
+                files
+                    + " files take "
+                    + walkMs
+                    + "ms to scan; file events will lag by up to "
+                    + interval / 1000
+                    + "s")
+            .path(root.toString()));
+  }
+
+  /** What changed between two snapshots, by size and mtime; pure so it can be tested as such. */
+  static Diff diff(Map<Path, Stamp> before, Map<Path, Stamp> after) {
+    List<Path> created = new ArrayList<>();
+    List<Path> modified = new ArrayList<>();
+    List<Path> deleted = new ArrayList<>();
+    for (Map.Entry<Path, Stamp> entry : after.entrySet()) {
+      Stamp was = before.get(entry.getKey());
+      if (was == null) {
+        created.add(entry.getKey());
+      } else if (!was.equals(entry.getValue())) {
+        modified.add(entry.getKey());
+      }
+    }
+    for (Path gone : before.keySet()) {
+      if (!after.containsKey(gone)) {
+        deleted.add(gone);
+      }
+    }
+    return new Diff(created, modified, deleted);
+  }
+
+  /**
+   * Keeps the growth runs current: a modified file's run grows or resets with its size, and any
+   * other file has stopped being written to, so it is no longer a live log.
+   */
+  private void trackGrowth(Map<Path, Stamp> before, Map<Path, Stamp> after, Diff diff) {
+    growthRuns.keySet().retainAll(new HashSet<>(diff.modified()));
+    for (Path file : diff.modified()) {
+      if (after.get(file).size() > before.get(file).size()) {
+        growthRuns.merge(file, 1, Integer::sum);
+      } else {
+        growthRuns.put(file, 0);
+      }
+    }
+  }
+
+  private void publish(Path root, Diff diff) {
+    if (diff.total() > props.getMaxFileEventsPerScan()) {
       // Collapsed rather than listed. Thousands of rows would evict the agent's own actions from
       // the replay buffer, which is the one thing a reader actually came for.
       bus.publish(
           WatchEvent.of(WatchEvent.Source.FS, "BULK")
               .summary(
-                  total
+                  diff.total()
                       + " files changed at once ("
-                      + created.size()
+                      + diff.created().size()
                       + " created, "
-                      + modified.size()
+                      + diff.modified().size()
                       + " modified, "
-                      + deleted.size()
+                      + diff.deleted().size()
                       + " deleted)")
               .path(root.toString()));
-    } else {
-      created.forEach(file -> emit("CREATED", root, file));
-      // APPENDED rather than MODIFIED for a file that keeps growing: it is the same fact with the
-      // part that matters kept, and the reader can then see at a glance which row is a log being
-      // written right now and worth opening to follow.
-      modified.forEach(file -> emit(appending(file) ? "APPENDED" : "MODIFIED", root, file));
-      deleted.forEach(file -> emit("DELETED", root, file));
+      return;
     }
-    git.refresh();
-    pace(startedAt);
+    diff.created().forEach(file -> emit("CREATED", root, file));
+    // APPENDED rather than MODIFIED for a file that keeps growing: it is the same fact with the
+    // part that matters kept, and the reader can then see at a glance which row is a log being
+    // written right now and worth opening to follow.
+    diff.modified().forEach(file -> emit(appending(file) ? "APPENDED" : "MODIFIED", root, file));
+    diff.deleted().forEach(file -> emit("DELETED", root, file));
   }
 
   /**
    * Sets when the next round may start, from what this one actually cost.
    *
    * <p>Measured from the start of the walk to after git has answered, so everything the round does
-   * is inside the duty cycle. Pacing on the walk alone was the bug this replaces: on a repository
-   * where `git status` is slow, the scanner kept its promised tenth of a core for the part it
-   * measured and spent whatever git asked on top.
+   * is inside the duty cycle. Pacing on the walk alone was the bug this replaces: `git.refresh()`
+   * starts five git processes, measured at 57ms in this repository and more on a large one, so the
+   * scanner kept its promised tenth of a core for the part it measured and spent whatever git asked
+   * on top.
    */
   private void pace(long startedAt) {
     if (props.getFsPollMs() <= 0) {

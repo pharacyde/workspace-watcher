@@ -297,58 +297,16 @@ public class GitService {
                 "--",
                 "."),
             15);
-    String[] entries = status.stdout().split("\0");
-    for (int i = 0; i < entries.length; i++) {
-      String line = entries[i];
-      if (line.length() < 4) {
-        continue;
-      }
-      char index = line.charAt(0);
-      char worktree = line.charAt(1);
-      String path = line.substring(3);
-      // A rename or copy carries the old path as the next field; the new one is what is shown,
-      // and the old one must not be read as an entry of its own.
-      if (index == 'R' || index == 'C' || worktree == 'R' || worktree == 'C') {
-        i++;
-      }
-      // An untracked nested repository is reported with a trailing slash - "?? tool/" - which
-      // would otherwise become "tool//b.txt" once it is used as a prefix.
-      if (path.endsWith("/")) {
-        path = path.substring(0, path.length() - 1);
-      }
-      path = prefix + path;
+    for (PorcelainStatus.Entry entry : PorcelainStatus.parse(status.stdout())) {
+      String path = prefix + entry.path();
       Path resolved = root.resolve(path);
-      // A submodule appears as a single entry whose path is a directory. Labelling it "modified"
-      // would invite a click that tries to diff a directory. NOFOLLOW_LINKS, because
-      // Files.isDirectory follows a symlink: a link to a directory outside the repository read as
-      // a submodule, and this then listed and served what was inside it - measured, on a server
-      // that has no authentication because everything it serves is meant to be inside the
-      // workspace.
-      boolean isDir = Files.isDirectory(resolved, LinkOption.NOFOLLOW_LINKS);
-      // A directory entry is only a repository when it has a .git. Without that test, a tracked
-      // file replaced on disk by a directory - git reports " D foo", so the index column is a
-      // space and reads as tracked - was labelled a submodule and descended into. The descent ran
-      // git status in a directory that is not a repository root, where porcelain paths still come
-      // back relative to the real root, so every file under it was listed a second time under a
-      // doubled prefix: "foo/foo/bar.txt", a row that diffs to two empty panes. Measured.
-      boolean isRepo = isDir && Files.exists(resolved.resolve(".git"));
-      boolean tracked = index != '?';
-      // Three things here are not files to click, and each is a different sentence to say. A
-      // tracked directory entry is a submodule of this project. An untracked one is a repository
-      // of its own that this project does not know about - a vendored clone, someone's scratch
-      // checkout - and git reports it as a single entry precisely because it will not look inside.
-      // And a symlink is neither: it has no content of its own to diff, and calling it "untracked"
-      // is what made clicking one open two empty panes with no explanation.
-      String state =
-          isRepo
-              ? (tracked ? "submodule" : "nested")
-              : Files.isSymbolicLink(resolved) ? "symlink" : describe(index, worktree);
-      files.add(new FileStatus(path, state, index != ' ' && index != '?'));
+      boolean repo = isRepository(resolved);
+      files.add(new FileStatus(path, stateOf(entry, resolved, repo), entry.staged()));
       // Only into a tracked one. An untracked nested checkout - a vendored clone, someone's
       // scratch repository - is not a submodule of this project, and descending into every one of
       // them would be an unbounded number of `git status` calls per refresh rather than the "one
       // per dirty submodule" this is costed at.
-      if (isRepo && tracked && depth < MAX_SUBMODULE_DEPTH) {
+      if (repo && entry.tracked() && depth < MAX_SUBMODULE_DEPTH) {
         // Right after its own row rather than at the end: the row says the recorded commit moved,
         // the rows under it say what moved it, and those are one thing to read rather than two.
         collectStatus(resolved, path + "/", files, depth + 1);
@@ -356,12 +314,39 @@ public class GitService {
     }
   }
 
-  private static String describe(char index, char worktree) {
-    if (index == '?') return "untracked";
-    if (index == 'A' || worktree == 'A') return "added";
-    if (index == 'D' || worktree == 'D') return "deleted";
-    if (index == 'R') return "renamed";
-    return "modified";
+  /**
+   * A status entry whose path is a repository of its own: a directory holding a {@code .git}.
+   *
+   * <p>NOFOLLOW_LINKS, because {@code Files.isDirectory} follows a symlink: a link to a directory
+   * outside the repository read as a submodule, and this then listed and served what was inside it
+   * - measured, on a server that has no authentication because everything it serves is meant to be
+   * inside the workspace.
+   *
+   * <p>And the {@code .git} test, because a tracked file replaced on disk by a directory - git
+   * reports " D foo", so the index column reads as tracked - was labelled a submodule and descended
+   * into. That ran git status in a directory that is not a repository root, where porcelain paths
+   * still come back relative to the real root, so every file under it was listed a second time
+   * under a doubled prefix: "foo/foo/bar.txt", a row that diffs to two empty panes. Measured.
+   */
+  private static boolean isRepository(Path resolved) {
+    return Files.isDirectory(resolved, LinkOption.NOFOLLOW_LINKS)
+        && Files.exists(resolved.resolve(".git"));
+  }
+
+  /**
+   * What the row is called, which for three shapes is not a file status at all.
+   *
+   * <p>A tracked directory entry is a submodule of this project. An untracked one is a repository
+   * of its own that this project does not know about - a vendored clone, someone's scratch checkout
+   * - and git reports it as a single entry precisely because it will not look inside. And a symlink
+   * is neither: it has no content of its own to diff, and calling it "untracked" is what made
+   * clicking one open two empty panes with no explanation.
+   */
+  private static String stateOf(PorcelainStatus.Entry entry, Path resolved, boolean repo) {
+    if (repo) {
+      return entry.tracked() ? "submodule" : "nested";
+    }
+    return Files.isSymbolicLink(resolved) ? "symlink" : entry.status();
   }
 
   /**

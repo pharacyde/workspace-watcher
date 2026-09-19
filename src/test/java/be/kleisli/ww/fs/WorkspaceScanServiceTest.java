@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -304,5 +305,36 @@ class WorkspaceScanServiceTest {
               assertThat(event.type()).isEqualTo("MODIFIED");
               assertThat(event.path()).isEqualTo("run.log");
             });
+  }
+
+  @Test
+  @DisplayName("the diff of two snapshots sorts every path into exactly one of three lists")
+  void diffsTwoSnapshots() {
+    Path same = Path.of("same.txt");
+    Path grown = Path.of("grown.log");
+    Path touched = Path.of("touched.txt");
+    Path gone = Path.of("gone.txt");
+    Path fresh = Path.of("fresh.txt");
+    Map<Path, WorkspaceScanService.Stamp> before =
+        Map.of(
+            same, new WorkspaceScanService.Stamp(1, 10),
+            grown, new WorkspaceScanService.Stamp(1, 10),
+            touched, new WorkspaceScanService.Stamp(1, 10),
+            gone, new WorkspaceScanService.Stamp(1, 10));
+    Map<Path, WorkspaceScanService.Stamp> after =
+        Map.of(
+            same, new WorkspaceScanService.Stamp(1, 10),
+            grown, new WorkspaceScanService.Stamp(2, 11),
+            // Same size, later mtime: a rewrite that happens to keep the length is still a change.
+            touched, new WorkspaceScanService.Stamp(1, 11),
+            fresh, new WorkspaceScanService.Stamp(1, 12));
+
+    WorkspaceScanService.Diff diff = WorkspaceScanService.diff(before, after);
+
+    assertThat(diff.created()).containsExactly(fresh);
+    assertThat(diff.modified()).containsExactlyInAnyOrder(grown, touched);
+    assertThat(diff.deleted()).containsExactly(gone);
+    assertThat(diff.total()).isEqualTo(4);
+    assertThat(WorkspaceScanService.diff(after, after).isEmpty()).isTrue();
   }
 }

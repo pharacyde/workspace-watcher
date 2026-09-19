@@ -6,14 +6,84 @@ import {
   FileVersionsDocument,
   ProcessFilesDocument,
 } from '../api/documents';
-import type { EventsSubscription } from '../gql/graphql';
+import type { EventsSubscription, FileVersionsQuery } from '../gql/graphql';
 import { panelStyles } from '../styles';
 import { languageFor, loadMonaco, monacoStyleSheet, type DiffEditor } from './monaco';
+import type * as Monaco from 'monaco-editor/editor/editor.api.js';
 
 type FeedEvent = EventsSubscription['events'];
+type FileVersions = FileVersionsQuery['fileVersions'];
 
 type SelectedProcess = { pid: string; command: string; cwd: string };
 type OpenFile = { fd: string; mode: string; path: string; relativePath: string | null };
+
+/** What the panel has been asked to show. The app sets at most one of the three at a time. */
+type Selection =
+  | { kind: 'nothing' }
+  | { kind: 'process'; process: SelectedProcess }
+  | { kind: 'event'; event: FeedEvent }
+  | { kind: 'file'; path: string };
+
+/** What one update has to do about the selection, decided before anything is touched. */
+type Transition =
+  | { kind: 'settled' }
+  | { kind: 'show-process' }
+  | { kind: 'show-event' }
+  | { kind: 'show-nothing' }
+  | { kind: 'open-diff'; path: string };
+
+function selectionOf(
+  process: SelectedProcess | null,
+  event: FeedEvent | null,
+  path: string | null,
+): Selection {
+  if (process) return { kind: 'process', process };
+  if (event) return { kind: 'event', event };
+  if (path) return { kind: 'file', path };
+  return { kind: 'nothing' };
+}
+
+function sameSelection(a: Selection, b: Selection): boolean {
+  if (a.kind !== b.kind) return false;
+  switch (a.kind) {
+    case 'nothing':
+      return true;
+    case 'process':
+      return a.process === (b as typeof a).process;
+    case 'event':
+      return a.event === (b as typeof a).event;
+    case 'file':
+      return a.path === (b as typeof a).path;
+  }
+}
+
+/**
+ * Names the transition between two selections. Pure, so the rules can be read in one place:
+ * an unchanged selection is a state change inside it (view, tail, badge) and rebuilds nothing.
+ */
+function classifyTransition(previous: Selection, current: Selection): Transition {
+  if (sameSelection(previous, current)) return { kind: 'settled' };
+  switch (current.kind) {
+    case 'process':
+      return { kind: 'show-process' };
+    case 'event':
+      return { kind: 'show-event' };
+    case 'nothing':
+      return { kind: 'show-nothing' };
+    case 'file':
+      return { kind: 'open-diff', path: current.path };
+  }
+}
+
+const EDITOR_OPTIONS: Monaco.editor.IStandaloneDiffEditorConstructionOptions = {
+  theme: 'watcher',
+  readOnly: true,
+  renderSideBySide: true,
+  automaticLayout: true,
+  fontSize: 12,
+  minimap: { enabled: false },
+  scrollBeyondLastLine: false,
+};
 
 /** How much of a file to keep in the browser. The end is the part being watched. */
 const CONTENT_LIMIT = 400_000;
@@ -508,107 +578,164 @@ export class DiffPanel extends LitElement {
   }
 
   updated(changed: Map<string, unknown>) {
-    if (changed.has('process')) {
-      // A new process is a new question; whatever file was open belonged to the previous one.
-      this.tailPath = null;
-      this.openFiles = null;
-      this.openFilesFailed = false;
-      if (this.process) void this.loadOpenFiles(this.process.pid);
+    if (changed.has('process')) this.resetProcessView();
+    this.syncTail();
+    const previous = selectionOf(
+      this.valueBefore(changed, 'process'),
+      this.valueBefore(changed, 'event'),
+      this.valueBefore(changed, 'path'),
+    );
+    const transition = classifyTransition(previous, this.selection());
+    switch (transition.kind) {
+      case 'settled':
+        return;
+      case 'show-process':
+        return this.showProcess();
+      case 'show-event':
+        return this.showEvent();
+      case 'show-nothing':
+        return this.showNothing();
+      case 'open-diff':
+        return this.openDiff(transition.path);
     }
-    // Anything other than "we are showing this file" stops the stream. Testing only for !event
-    // left it running when the selection moved to an event with no path at all - a Bash call, say -
-    // so a log kept streaming into a panel that was showing something else entirely.
-    if (this.tailPath) {
-      this.follow(this.tailPath);
-    } else if (this.event?.path && this.view === 'content') {
-      this.follow(this.event.path);
-    } else {
-      this.stopFollowing();
-    }
-    if (this.process) {
-      // The diff container has left the DOM, exactly as it does for an event.
-      this.stopWatchingDiff();
-      this.disposeEditor();
-      return;
-    }
-    if (!changed.has('path') && !changed.has('event')) return;
-    if (changed.has('event')) {
-      // A new selection starts on the file, not on the record: selecting a file is a request to
-      // see what is in it.
-      this.view = 'content';
-    }
-    if (this.event) {
-      this.stopWatchingDiff();
-      // Showing an event means the diff container has left the DOM. Holding on to an editor
-      // attached to a detached node is what made returning to the same file show an empty panel:
-      // the path had not changed, so nothing rebuilt, and the fresh container stayed empty.
-      this.disposeEditor();
-      return;
-    }
-    if (!this.path) {
-      this.stopWatchingDiff();
-      this.message = 'select a row or a file to inspect it';
-      return;
-    }
-    const requested = this.path;
-    // A different file is a different subscription; the old one would otherwise keep refreshing a
-    // diff that is no longer on screen.
-    if (this.diffWatched !== requested) this.stopWatchingDiff();
+  }
 
-    // Monaco is fetched the first time a file is opened, not on page load. It is by far the
-    // heaviest thing here, and a dashboard that is mostly watched rather than clicked should not
-    // pay for it up front.
-    Promise.all([loadMonaco(), request(FileVersionsDocument, { path: requested })])
-      .then(async ([monaco, { fileVersions }]) => {
-        if (!this.isConnected || this.path !== requested) return;
-        if (fileVersions.binary) return void (this.message = 'binary file');
-        if (fileVersions.tooLarge) return void (this.message = 'file too large to diff');
-        this.message = null;
-        await this.updateComplete;
+  private selection(): Selection {
+    return selectionOf(this.process, this.event, this.path);
+  }
 
-        const container = this.renderRoot.querySelector<HTMLElement>('.monaco');
-        if (!container) return;
+  /** The value a property had before this update; Lit only records it when it changed. */
+  private valueBefore<K extends 'process' | 'event' | 'path'>(
+    changed: Map<string, unknown>,
+    key: K,
+  ): DiffPanel[K] {
+    return (changed.has(key) ? changed.get(key) : this[key]) as DiffPanel[K];
+  }
 
-        const shadow = this.renderRoot as ShadowRoot;
-        const sheet = await monacoStyleSheet();
-        if (!this.isConnected || this.path !== requested) return;
-        if (!shadow.adoptedStyleSheets.includes(sheet)) {
-          shadow.adoptedStyleSheets = [...shadow.adoptedStyleSheets, sheet];
-        }
+  /** A new process is a new question; whatever file was open belonged to the previous one. */
+  private resetProcessView() {
+    this.tailPath = null;
+    this.openFiles = null;
+    this.openFilesFailed = false;
+    if (this.process) void this.loadOpenFiles(this.process.pid);
+  }
 
-        this.editor ??= monaco.editor.createDiffEditor(container, {
-          theme: 'watcher',
-          readOnly: true,
-          renderSideBySide: true,
-          automaticLayout: true,
-          fontSize: 12,
-          minimap: { enabled: false },
-          scrollBeyondLastLine: false,
-        });
+  /**
+   * Follows the one file that is on screen as content, and nothing otherwise.
+   *
+   * <p>Anything other than "we are showing this file" stops the stream. Testing only for !event
+   * left it running when the selection moved to an event with no path at all - a Bash call, say -
+   * so a log kept streaming into a panel that was showing something else entirely.
+   */
+  private syncTail() {
+    const target =
+      this.tailPath || (this.event?.path && this.view === 'content' ? this.event.path : null);
+    if (target) this.follow(target);
+    else this.stopFollowing();
+  }
 
-        // Attach the new pair first and only then dispose the old one, for the same reason: a
-        // model the editor still references must not be disposed underneath it.
-        const language = languageFor(requested);
-        const previous = this.editor.getModel();
-        this.editor.setModel({
-          original: monaco.editor.createModel(fileVersions.head, language),
-          modified: monaco.editor.createModel(fileVersions.working, language),
-        });
-        previous?.original.dispose();
-        previous?.modified.dispose();
-        // After watchDiff, not before: it starts by tearing the previous watch down, and that
-        // clears the badge along with it - which is how this went out with no badge at all.
-        this.watchDiff(requested);
-        this.showVersionsOf(fileVersions);
-      })
-      .catch((error: Error) => {
-        if (this.path !== requested) return;
-        // The editor is loaded on demand, so a rebuild can leave its chunk missing. Saying so is
-        // more use than "Importing a module script failed", which names no cause and no cure.
-        this.message = /import|module script|Failed to fetch/i.test(error.message)
-          ? 'the dashboard was rebuilt; reload the page to load the editor'
-          : error.message;
-      });
+  /** The diff container has left the DOM, exactly as it does for an event. */
+  private showProcess() {
+    this.leaveDiff();
+  }
+
+  /** A new selection starts on the file, not on the record: selecting a file is to see it. */
+  private showEvent() {
+    this.view = 'content';
+    this.leaveDiff();
+  }
+
+  private showNothing() {
+    this.stopWatchingDiff();
+    this.message = 'select a row or a file to inspect it';
+  }
+
+  /**
+   * Showing an event or a process means the diff container has left the DOM. Holding on to an
+   * editor attached to a detached node is what made returning to the same file show an empty
+   * panel: the path had not changed, so nothing rebuilt, and the fresh container stayed empty.
+   */
+  private leaveDiff() {
+    this.stopWatchingDiff();
+    this.disposeEditor();
+  }
+
+  /**
+   * Opens the diff of a file: fetches both sides, and Monaco the first time.
+   *
+   * <p>Monaco is fetched the first time a file is opened, not on page load. It is by far the
+   * heaviest thing here, and a dashboard that is mostly watched rather than clicked should not
+   * pay for it up front.
+   */
+  private openDiff(path: string) {
+    // A different file is a different subscription; the old one would otherwise keep refreshing
+    // a diff that is no longer on screen.
+    if (this.diffWatched !== path) this.stopWatchingDiff();
+    Promise.all([loadMonaco(), request(FileVersionsDocument, { path })])
+      .then(([monaco, { fileVersions }]) => this.showDiff(monaco, path, fileVersions))
+      .catch((error: Error) => this.failDiff(path, error));
+  }
+
+  /** True once the click has moved on while the fetch was in flight, so nothing may be touched. */
+  private abandoned(path: string): boolean {
+    return !this.isConnected || this.path !== path;
+  }
+
+  private async showDiff(monaco: typeof Monaco, path: string, versions: FileVersions) {
+    if (this.abandoned(path)) return;
+    if (versions.binary) return void (this.message = 'binary file');
+    if (versions.tooLarge) return void (this.message = 'file too large to diff');
+    this.message = null;
+    await this.updateComplete;
+
+    const container = this.renderRoot.querySelector<HTMLElement>('.monaco');
+    if (!container) return;
+    const sheet = await monacoStyleSheet();
+    if (this.abandoned(path)) return;
+    this.adoptStyleSheet(sheet);
+
+    this.editor ??= monaco.editor.createDiffEditor(container, EDITOR_OPTIONS);
+    this.replaceModels(this.editor, monaco, path, versions);
+    // After watchDiff, not before: it starts by tearing the previous watch down, and that
+    // clears the badge along with it - which is how this went out with no badge at all.
+    this.watchDiff(path);
+    this.showVersionsOf(versions);
+  }
+
+  private adoptStyleSheet(sheet: CSSStyleSheet) {
+    const shadow = this.renderRoot as ShadowRoot;
+    if (!shadow.adoptedStyleSheets.includes(sheet)) {
+      shadow.adoptedStyleSheets = [...shadow.adoptedStyleSheets, sheet];
+    }
+  }
+
+  /**
+   * Attaches a new pair of models and only then disposes the old one, for the same reason as
+   * disposeEditor: a model the editor still references must not be disposed underneath it.
+   */
+  private replaceModels(
+    editor: DiffEditor,
+    monaco: typeof Monaco,
+    path: string,
+    versions: FileVersions,
+  ) {
+    const language = languageFor(path);
+    const previous = editor.getModel();
+    editor.setModel({
+      original: monaco.editor.createModel(versions.head, language),
+      modified: monaco.editor.createModel(versions.working, language),
+    });
+    previous?.original.dispose();
+    previous?.modified.dispose();
+  }
+
+  private failDiff(path: string, error: Error) {
+    if (this.path !== path) return;
+    // The editor is loaded on demand, so a rebuild can leave its chunk missing. Saying so is
+    // more use than "Importing a module script failed", which names no cause and no cure.
+    this.message = /import|module script|Failed to fetch/i.test(error.message)
+      ? 'the dashboard was rebuilt; reload the page to load the editor'
+      : error.message;
   }
 
   private async loadOpenFiles(pid: string) {

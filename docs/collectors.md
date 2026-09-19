@@ -160,7 +160,8 @@ was measured and lost. It is not a description of what the collectors do.
   quoting off entirely; entries then end in NUL instead of newline, and a rename or copy is two
   fields, new path first, with no ` -> `. The other git calls here are safe: `rev-parse
   --show-toplevel` prints raw, and `log`, `cat-file` and `show` take paths in rather than printing
-  them out. `GitServiceTest.reportsQuotedPathsRaw` covers all three shapes.
+  them out. `GitServiceTest.reportsQuotedPathsRaw` covers all three shapes end to end, and
+  `PorcelainStatusTest` the parser (`PorcelainStatus.parse`) on its own.
 - **Do not add JGit.** Shelling out to `git` is faster on large repositories and cannot drift from
   what the user sees in their own terminal.
 

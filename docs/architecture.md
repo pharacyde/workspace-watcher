@@ -13,7 +13,7 @@ be.kleisli.ww
 │            the spool dir), HookEvents (shared parsing), TranscriptLocator, SessionRegistry,
 │            WorkspaceRegistry
 ├── fs       WorkspaceScanService (mtime+size snapshot poller), FileTailService, FileChangeService
-├── git      GitService (shells out to git; no JGit)
+├── git      GitService (shells out to git; no JGit), PorcelainStatus (pure `status -z` parser)
 ├── proc     ProcessTreeService (lsof -a -d cwd + ProcessHandle)
 ├── guard    GuardService (the one hook that may block, off by default)
 ├── store    EventStore (queues and flushes to SQLite)

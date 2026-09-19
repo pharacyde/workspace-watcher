@@ -11,6 +11,56 @@ type Event = EventsSubscription['events'];
 const MAX_EVENTS = 20_000;
 const ALL_SOURCES: Source[] = ['TRANSCRIPT', 'HOOK', 'GUARD', 'FS', 'SYSTEM'];
 
+// One formatter for every row: toLocaleTimeString builds one per call, and the virtualizer asks
+// for every visible row on every frame (P11-08, measured 1.27 ms against 0.044 ms per 60 rows).
+const CLOCK = new Intl.DateTimeFormat('en-GB', {
+  hour12: false,
+  hour: 'numeric',
+  minute: 'numeric',
+  second: 'numeric',
+});
+
+function clock(iso: string): string {
+  return CLOCK.format(new Date(iso));
+}
+
+/** Keys the user scrolls up with; each one is a request to stop following. */
+const SCROLL_UP_KEYS = ['ArrowUp', 'PageUp', 'Home'];
+
+/** How far the scroll container sits from its end. */
+function tailGap(list: HTMLElement): number {
+  return list.scrollHeight - list.scrollTop - list.clientHeight;
+}
+
+/**
+ * Whether an input reads as "scroll up", and so as a request to stop following.
+ *
+ * <p>Intent, not position, for wheel and key: both fire before the browser has scrolled, so at the
+ * bottom a measurement still reads zero. A touch drag carries no direction worth trusting, so that
+ * one measures. Rationale in docs/frontend.md, "Wheel and key handlers must read intent".
+ */
+function asksToStopFollowing(event: globalThis.Event, list: HTMLElement | null): boolean {
+  if (event instanceof WheelEvent) return event.deltaY < 0;
+  if (event instanceof KeyboardEvent) return SCROLL_UP_KEYS.includes(event.key);
+  return list !== null && tailGap(list) > 80;
+}
+
+/** Whether an event survives the source, session and search filters. */
+function matches(event: Event, hidden: Set<Source>, session: string, needle: string): boolean {
+  return (
+    !hidden.has(event.source) &&
+    (session === '' || event.sessionId === session) &&
+    (needle === '' ||
+      (event.summary ?? '').toLowerCase().includes(needle) ||
+      (event.path ?? '').toLowerCase().includes(needle))
+  );
+}
+
+/** The classes on a row: error state, source, and whether long lines wrap. */
+function rowClass(event: Event, wrap: boolean): string {
+  return `rowline ${event.type === 'TOOL_ERROR' ? 'error' : ''} ${event.source} ${wrap ? 'wrapped' : ''}`;
+}
+
 /** Short label per source, so the eye can tell attributed events from unattributed ones. */
 function label(source: Source, type: string): string {
   switch (source) {
@@ -48,22 +98,7 @@ function collapse(events: Event[]): Row[] {
   const rows: Row[] = [];
   for (const event of events) {
     const last = rows[rows.length - 1];
-    if (
-      last &&
-      last.event.source === event.source &&
-      last.event.type === event.type &&
-      last.event.path === event.path &&
-      last.event.summary === event.summary &&
-      // Attribution is part of what makes two rows the same. Without this, two subagents each
-      // reading the same file fold into one row carrying the second one's name - a row that then
-      // states an attribution which is wrong for half of what it stands for, which is the one
-      // thing this project is built not to do. It also hid that the session filter would have
-      // separated them.
-      last.event.sessionId === event.sessionId &&
-      last.event.agent === event.agent &&
-      last.event.subagent === event.subagent &&
-      last.event.mcpServer === event.mcpServer
-    ) {
+    if (last && sameRow(last.event, event)) {
       // The newest one is kept, so the timestamp on the row is when it last happened.
       last.event = event;
       last.repeats++;
@@ -72,6 +107,27 @@ function collapse(events: Event[]): Row[] {
     }
   }
   return rows;
+}
+
+/**
+ * Whether two events say the same thing about the same file, by the same actor.
+ *
+ * <p>Attribution is part of what makes two rows the same. Without it, two subagents each reading
+ * the same file fold into one row carrying the second one's name - a row that then states an
+ * attribution which is wrong for half of what it stands for, which is the one thing this project
+ * is built not to do. It also hid that the session filter would have separated them.
+ */
+function sameRow(a: Event, b: Event): boolean {
+  return (
+    a.source === b.source &&
+    a.type === b.type &&
+    a.path === b.path &&
+    a.summary === b.summary &&
+    a.sessionId === b.sessionId &&
+    a.agent === b.agent &&
+    a.subagent === b.subagent &&
+    a.mcpServer === b.mcpServer
+  );
 }
 
 export class Feed extends LitElement {
@@ -273,31 +329,19 @@ export class Feed extends LitElement {
    * virtualizer was still growing made an earlier version conclude "not at the bottom" and switch
    * following off permanently - one row in, and the feed silently stopped following.
    */
-  private onUserScroll = (event: Event) => {
-    if (!this.follow) return;
-    // Intent, not position. wheel and keydown both fire before the browser has scrolled, so at the
-    // bottom the measurement still reads a gap of zero and follow survives - it used to take a
-    // second notch to notice. That window was harmless until re-pinning on rangeChanged closed it
-    // for good: measured, five notches up moved scrollTop by nothing at all and the feed could no
-    // longer be scrolled back by hand. Scrolling up is a request to stop following, and that is
-    // readable at the moment it is asked.
-    if (event instanceof WheelEvent) {
-      if (event.deltaY < 0) this.follow = false;
-      return;
-    }
-    if (event instanceof KeyboardEvent) {
-      if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) this.follow = false;
-      return;
-    }
-    // A touch drag carries no direction worth trusting, so this one still measures.
-    const list = this.list;
-    if (list && list.scrollHeight - list.scrollTop - list.clientHeight > 80) {
-      this.follow = false;
-    }
+  private onUserScroll = (event: globalThis.Event) => {
+    // Intent, not position: wheel and keydown fire before the browser has scrolled, and once
+    // rangeChanged re-pinned the view, measuring here left the feed impossible to scroll up.
+    if (this.follow && asksToStopFollowing(event, this.list)) this.follow = false;
   };
 
   private pin(list: HTMLElement) {
     list.scrollTop = list.scrollHeight;
+  }
+
+  /** Whether the view should be at the bottom right now: following is on and this is live. */
+  private following(): boolean {
+    return this.follow && !this.replay;
   }
 
   private get list(): (HTMLElement & { layoutComplete?: Promise<void> }) | null {
@@ -316,9 +360,8 @@ export class Feed extends LitElement {
    * when it has done more work, so that is what to listen to.
    */
   private onRangeChanged = () => {
-    if (!this.follow || this.replay) return;
     const list = this.list;
-    if (!list) return;
+    if (!this.following() || !list) return;
     // No guard on the position here. Comparing against where we last pinned looked safer and was
     // measured wrong: changing every row's height moves scrollTop by itself - the browser keeps the
     // reader's anchor - so a wrap toggle read as "a person scrolled" and switched following off.
@@ -391,13 +434,11 @@ export class Feed extends LitElement {
    * common case and writes nothing, so our own pin does not feed itself.
    */
   private onScroll = () => {
-    if (!this.follow || this.replay) return;
     const list = this.list;
-    if (!list) return;
+    if (!this.following() || !list) return;
     // A pixel of slack: scrollTop is fractional on a scaled display and an exact comparison would
     // rewrite it forever.
-    if (list.scrollHeight - list.scrollTop - list.clientHeight <= 1) return;
-    this.pin(list);
+    if (tailGap(list) > 1) this.pin(list);
   };
 
   /**
@@ -408,9 +449,9 @@ export class Feed extends LitElement {
   private followGeneration = 0;
 
   private async followTail(count: number) {
-    // Two conditions, deliberately: the button is the intent, being scrolled to the bottom is the
-    // moment. Following while someone has scrolled up to read would yank the view away from them.
-    if (!this.follow || this.replay || count === 0) return;
+    // The button is the intent; following while someone has scrolled up to read would yank the
+    // view away from them, and onUserScroll has already turned it off by the time this runs.
+    if (!this.following() || count === 0) return;
     const list = this.list;
     if (!list) return;
     const generation = ++this.followGeneration;
@@ -434,15 +475,20 @@ export class Feed extends LitElement {
     // itself superseded before it ever scrolled - the feed would stop following during exactly the
     // burst this exists for. Every call scrolls at least once; only the settling below gives way.
 
-    // Scrolling once is not enough. The virtualizer re-measures rows after layoutComplete has
-    // resolved, so the height we just scrolled to can already be stale - most visibly when the
-    // wrap toggle changes every row's height at once, which left the feed hundreds of pixels
-    // short of the end. So scroll, let a frame pass, and scroll again until the height settles.
-    // Bounded, and it stops on its own as soon as two frames agree.
-    // A few frames of settling for the height the rows already have. Anything measured later is
-    // caught by onRangeChanged instead - a bounded loop here cannot be the answer to that, because
-    // the only bound it can pick is a guess at how long measuring takes, and that grows with the
-    // list.
+    await this.settle(list, generation);
+  }
+
+  /**
+   * Scrolls once per frame until two frames agree on the height, at most five times.
+   *
+   * <p>Scrolling once is not enough: the virtualizer re-measures rows after layoutComplete has
+   * resolved, so the height just scrolled to can already be stale - most visibly when the wrap
+   * toggle changes every row's height at once, which left the feed hundreds of pixels short of the
+   * end. Anything measured later is caught by onRangeChanged instead: a bounded loop cannot be
+   * the answer to that, because the only bound it can pick is a guess at how long measuring takes,
+   * and that grows with the list.
+   */
+  private async settle(list: HTMLElement, generation: number) {
     let previous = -1;
     for (let attempt = 0; attempt < 5 && list.scrollHeight !== previous; attempt++) {
       previous = list.scrollHeight;
@@ -488,19 +534,11 @@ export class Feed extends LitElement {
     // Picking one agent hides everything that cannot be attributed to it, filesystem events
     // included: they carry no session, so claiming they belong to the selected one would be a
     // guess of exactly the kind this project refuses to make elsewhere.
-    const source = this.replay ? this.replayed : this.log.items;
     const needle = this.search.toLowerCase();
-    const result = source.filter(
-      (event) =>
-        !this.hidden_.has(event.source) &&
-        (this.session === '' || event.sessionId === this.session) &&
-        (needle === '' ||
-          (event.summary ?? '').toLowerCase().includes(needle) ||
-          (event.path ?? '').toLowerCase().includes(needle)),
-    );
+    const result = items.filter((event) => matches(event, this.hidden_, this.session, needle));
     const rows = collapse(result);
     this.cache = {
-      items: source,
+      items,
       hidden: this.hidden_,
       session: this.session,
       search: this.search,
@@ -541,105 +579,115 @@ export class Feed extends LitElement {
       <h2>
         ${this.replay ? 'Replay' : 'Activity'}
         <span class="count">${(this.cache?.events ?? visible.length).toLocaleString()}</span>
-        ${this.replay
-          ? html`<span class="replaying"
-              >${new Date(this.replay.since).toLocaleTimeString('en-GB', { hour12: false })}</span
-            >`
-          : ''}
-        <button
-          class=${this.follow ? 'on' : ''}
-          title="Scroll to the newest row as it arrives, like tail -f"
-          @click=${() => (this.follow = !this.follow)}
-        >
-          ${this.follow ? '⤓ follow' : '⤓ follow off'}
-        </button>
-        <button
-          class=${this.wrap ? 'on' : ''}
-          title="Let a long command spill onto several lines instead of being cut off"
-          @click=${() => (this.wrap = !this.wrap)}
-        >
-          ${this.wrap ? '⏎ wrap on' : '⏎ wrap off'}
-        </button>
-        <button
-          class=${this.log.paused ? 'paused' : ''}
-          title="Hold new events. Nothing is lost - they arrive when you resume."
-          @click=${() => this.log.setPaused(!this.log.paused)}
-        >
-          ${this.log.paused
-            ? html`▶ resume${this.log.held ? html` (${this.log.held})` : ''}`
-            : '⏸ pause'}
-        </button>
-        ${this.sessionPicker()}
-        <span class="filters">
-          ${ALL_SOURCES.map(
-            (source) => html`
-              <label>
-                <input
-                  type="checkbox"
-                  .checked=${!this.hidden_.has(source)}
-                  @change=${() => this.toggle(source)}
-                />${source.toLowerCase()}
-              </label>
-            `,
-          )}
-        </span>
+        ${this.replay ? html`<span class="replaying">${clock(this.replay.since)}</span>` : ''}
+        ${this.renderControls()} ${this.sessionPicker()} ${this.renderFilterBar()}
       </h2>
-      <div class="body" style="padding:0;overflow:hidden">
-        ${visible.length === 0
-          ? html`<p class="empty">waiting for activity…</p>`
-          : html`
-              <lit-virtualizer
-                scroller
-                @wheel=${this.onUserScroll}
-                @touchmove=${this.onUserScroll}
-                @keydown=${this.onUserScroll}
-                @rangeChanged=${this.onRangeChanged}
-                @scroll=${this.onScroll}
-                .items=${visible}
-                .renderItem=${(row: Row | undefined) => {
-                  // The virtualizer can ask for an index the list no longer has, in the frame
-                  // where switching between live and replay swaps the array underneath it.
-                  if (!row) return html``;
-                  const event = row.event;
-                  return html`
-                  <div
-                    class="rowline ${event.type === 'TOOL_ERROR' ? 'error' : ''} ${event.source} ${this.wrap ? 'wrapped' : ''}"
-                    style="cursor:pointer"
-                    @click=${() =>
-                      this.dispatchEvent(
-                        new CustomEvent('event-selected', {
-                          detail: event,
-                          bubbles: true,
-                          composed: true,
-                        }),
-                      )}
-                  >
-                    <span class="ts"
-                      >${new Date(event.ts).toLocaleTimeString('en-GB', { hour12: false })}</span
-                    >
-                    <span class="tag ${event.source}">${label(event.source, event.type)}</span>
-                    <span class="msg ${this.wrap ? '' : 'ellipsis'}">
-                      ${event.mcpServer
-                        ? html`<span class="chip mcp">mcp:${event.mcpServer}</span>`
-                        : ''}${event.type === 'APPENDED'
-                        ? html`<span class="chip live">live</span>`
-                        : ''}${event.subagent
-                        ? html`<span class="chip sub">agent:${event.subagent}</span>`
-                        : ''}${event.agent
-                        ? html`<span class="agent">${event.agent} </span>`
-                        : ''}${event.summary}${row.repeats > 1
-                        ? html`<span class="repeats" title="the same thing, this many times in a row"
-                            >×${row.repeats}</span
-                          >`
-                        : ''}
-                    </span>
-                        </div>
-                      `;
-                }}
-              ></lit-virtualizer>
-            `}
+      <div class="body" style="padding:0;overflow:hidden">${this.renderList(visible)}</div>
+    `;
+  }
+
+  /** Follow, wrap, pause - in that order; the browser test finds them by position. */
+  private renderControls() {
+    return html`
+      <button
+        class=${this.follow ? 'on' : ''}
+        title="Scroll to the newest row as it arrives, like tail -f"
+        @click=${() => (this.follow = !this.follow)}
+      >
+        ${this.follow ? '⤓ follow' : '⤓ follow off'}
+      </button>
+      <button
+        class=${this.wrap ? 'on' : ''}
+        title="Let a long command spill onto several lines instead of being cut off"
+        @click=${() => (this.wrap = !this.wrap)}
+      >
+        ${this.wrap ? '⏎ wrap on' : '⏎ wrap off'}
+      </button>
+      <button
+        class=${this.log.paused ? 'paused' : ''}
+        title="Hold new events. Nothing is lost - they arrive when you resume."
+        @click=${() => this.log.setPaused(!this.log.paused)}
+      >
+        ${this.log.paused
+          ? html`▶ resume${this.log.held ? html` (${this.log.held})` : ''}`
+          : '⏸ pause'}
+      </button>
+    `;
+  }
+
+  private renderFilterBar() {
+    return html`
+      <span class="filters">
+        ${ALL_SOURCES.map(
+          (source) => html`
+            <label>
+              <input
+                type="checkbox"
+                .checked=${!this.hidden_.has(source)}
+                @change=${() => this.toggle(source)}
+              />${source.toLowerCase()}
+            </label>
+          `,
+        )}
+      </span>
+    `;
+  }
+
+  private renderList(visible: Row[]) {
+    if (visible.length === 0) return html`<p class="empty">waiting for activity…</p>`;
+    // A fresh renderItem closure on every render, on purpose: the virtualizer only re-renders its
+    // rows when a property changes, and `visible` is cached, so a wrap toggle would leave the
+    // rows on screen unwrapped if the function were stable.
+    return html`
+      <lit-virtualizer
+        scroller
+        @wheel=${this.onUserScroll}
+        @touchmove=${this.onUserScroll}
+        @keydown=${this.onUserScroll}
+        @rangeChanged=${this.onRangeChanged}
+        @scroll=${this.onScroll}
+        .items=${visible}
+        .renderItem=${(row: Row | undefined) => this.renderRow(row)}
+      ></lit-virtualizer>
+    `;
+  }
+
+  private renderRow(row: Row | undefined) {
+    // The virtualizer can ask for an index the list no longer has, in the frame where switching
+    // between live and replay swaps the array underneath it.
+    if (!row) return html``;
+    const event = row.event;
+    return html`
+      <div
+        class=${rowClass(event, this.wrap)}
+        style="cursor:pointer"
+        @click=${() =>
+          this.dispatchEvent(
+            new CustomEvent('event-selected', { detail: event, bubbles: true, composed: true }),
+          )}
+      >
+        <span class="ts">${clock(event.ts)}</span>
+        <span class="tag ${event.source}">${label(event.source, event.type)}</span>
+        <span class="msg ${this.wrap ? '' : 'ellipsis'}">
+          ${this.renderChips(event)}${event.summary}${row.repeats > 1
+            ? html`<span class="repeats" title="the same thing, this many times in a row"
+                >×${row.repeats}</span
+              >`
+            : ''}
+        </span>
       </div>
     `;
+  }
+
+  /** What set the event apart: an MCP server, a file still being written, a subagent, an agent. */
+  private renderChips(event: Event) {
+    return html`${event.mcpServer
+      ? html`<span class="chip mcp">mcp:${event.mcpServer}</span>`
+      : ''}${event.type === 'APPENDED'
+      ? html`<span class="chip live">live</span>`
+      : ''}${event.subagent
+      ? html`<span class="chip sub">agent:${event.subagent}</span>`
+      : ''}${event.agent ? html`<span class="agent">${event.agent} </span>` : ''}`;
   }
 }
 

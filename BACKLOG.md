@@ -335,11 +335,12 @@ keer geserialiseerd, verstuurd en geparsed - inclusief het volledige `detail`-ve
 gebruikt (het kijkt alleen naar type, source, ts en summary, en alleen terwijl de tab verborgen is).
 Gemeten 2328 bytes per bericht bij een detail van 2 kB.*
 
-**P11-08 `toLocaleTimeString` per zichtbare rij per frame** 🟢
+**P11-08 `toLocaleTimeString` per zichtbare rij per frame** ✅
 *De virtualizer hertekent zijn zichtbare bereik bij elke update, dus bij ~60 rijen op 60 fps zijn dat
 3600 Intl-formatteringen per seconde. Gemeten 1,25 ms per frame tegen 0,03 ms met één gehoiste
-`Intl.DateTimeFormat` - 7,5% van het frame-budget, voor drie regels werk. `timeline.ts` doet het al
-zo.*
+`Intl.DateTimeFormat` - 7,5% van het frame-budget, voor drie regels werk. Gedaan in `feed.ts`
+(`clock()`). Correctie op de eerdere tekst: `timeline.ts` deed het níet al zo - het roept
+`toLocaleTimeString` één keer per label aan, niet per rij, en is daarom geen hotspot.*
 
 **P11-09 Gepauzeerd is duurder dan niet-gepauzeerd** 🟡
 *In de paused-tak van `subscriptions.ts` gaat elk binnenkomend event langs de rAF-batching heen met

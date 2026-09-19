@@ -48,6 +48,12 @@ bundle is 155 kB (42 kB gzipped) with Monaco code-split.
   it scrolls the nearest scrolling ancestor and setting `scrollTop` on the element does nothing.
   Scroll after awaiting `layoutComplete`; rows are measured asynchronously. Avoid `scrollToIndex` —
   the library documents it as a shim it plans to remove, and it threw on an unlaid-out row.
+- **The feed hands `lit-virtualizer` a fresh `renderItem` closure on every render, on purpose.**
+  `renderItem` is a reactive property on the element, so it only re-renders its rows when one of
+  its properties changes by reference. The row list is cached against the filters and does not
+  change on a wrap toggle, so a stable `this.renderRow` reference - the obvious tidy-up when
+  `Feed.renderList` was split out of `render` - would leave the rows already on screen unwrapped
+  while every newly scrolled-in row wrapped. The per-render closure is what makes the toggle apply.
 - **Detach Monaco from its models before disposing them.** `setModel(null)` first, or attach the
   new pair first — disposing a model the editor still points at raises "TextModel got disposed
   before DiffEditorWidget model got reset". It does not throw straight away, which is why it only
