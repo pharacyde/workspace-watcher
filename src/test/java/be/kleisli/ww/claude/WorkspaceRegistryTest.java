@@ -1,5 +1,6 @@
 package be.kleisli.ww.claude;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import be.kleisli.ww.core.ActiveWorkspace;
@@ -8,6 +9,12 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -152,5 +159,84 @@ class WorkspaceRegistryTest {
     assertThat(registry.current())
         .singleElement()
         .satisfies(e -> assertThat(e.pendingEvents()).isEqualTo(2));
+  }
+
+  @Test
+  @DisplayName("a non-ASCII path is escaped over its UTF-8 bytes, so the hook can agree with it")
+  void escapesNonAsciiPathBytewise() {
+    // Measured on this machine with /Users/josé/proj ect: the hook's bash expansion gave
+    // -Users-josé-proj-ect under the UTF-8 locale and -Users-jos---proj-ect under LC_ALL=C, while
+    // Java gave -Users-jos--proj-ect. Three names for one project, and the drain looked up the
+    // third: every hook event for that project was silently never picked up. Bytes are the one
+    // thing both sides can count the same way, which is why é escapes to two dashes.
+    WorkspaceRegistry registry = new WorkspaceRegistry(props, new ActiveWorkspace(props));
+
+    assertThat(registry.spoolFor(Path.of("/Users/josé/proj ect")).getFileName())
+        .hasToString("-Users-jos---proj-ect");
+    // The decomposed form macOS often stores is a different byte sequence and gets a different
+    // name. That is deliberate: the hook sees the same bytes and cannot normalise them without a
+    // fork, so folding the two forms together here would reopen the disagreement.
+    assertThat(registry.spoolFor(Path.of("/Users/josé/proj ect")).getFileName())
+        .hasToString("-Users-jose---proj-ect");
+  }
+
+  @Test
+  @DisplayName("the hook script creates exactly the directory the drain looks up, in any locale")
+  void hookScriptAgreesWithSpoolFor() throws IOException, InterruptedException {
+    // Surefire runs from the project root, so the script is where the README points to.
+    Path script = Path.of("hooks/workspace-watcher-hook.sh").toAbsolutePath();
+    Assumptions.assumeTrue(Files.isRegularFile(script), "hook script not found: " + script);
+    WorkspaceRegistry registry = new WorkspaceRegistry(props, new ActiveWorkspace(props));
+
+    for (String project :
+        List.of(
+            "/Users/josé/proj ect", // é as one code point (NFC)
+            "/Users/josé/proj ect", // e plus combining acute (NFD, as macOS often stores it)
+            "/Users/me/plain")) {
+      // Bracket ranges collate under a UTF-8 locale and count bytes under C; the script must give
+      // one answer regardless of which locale Claude Code happens to launch it with.
+      for (String locale : List.of("en_US.UTF-8", "C")) {
+        Path base = Files.createDirectories(tmp.resolve("spool-" + locale));
+        runHook(script, base, project, locale);
+
+        List<Path> created;
+        try (Stream<Path> dirs = Files.list(base)) {
+          created = dirs.sorted().toList();
+        }
+        assertThat(created)
+            .as("directory for %s under LC_ALL=%s", project, locale)
+            .map(dir -> dir.getFileName().toString())
+            .containsExactly(registry.spoolFor(Path.of(project)).getFileName().toString());
+        assertThat(Files.readString(created.getFirst().resolve(".workspace"), UTF_8))
+            .isEqualTo(project + "\n");
+        deleteTree(base);
+      }
+    }
+  }
+
+  private static void runHook(Path script, Path spoolBase, String project, String locale)
+      throws IOException, InterruptedException {
+    ProcessBuilder pb = new ProcessBuilder("bash", script.toString());
+    Map<String, String> env = pb.environment();
+    env.put("WORKSPACE_WATCHER_SPOOL", spoolBase.toString());
+    env.put("CLAUDE_PROJECT_DIR", project);
+    env.put("LC_ALL", locale);
+    env.put("LANG", locale);
+    env.remove("WORKSPACE_WATCHER_URL");
+    pb.redirectErrorStream(true);
+    Process process = pb.start();
+    process.getOutputStream().write("{\"hook_event_name\":\"PostToolUse\"}".getBytes(UTF_8));
+    process.getOutputStream().close();
+    String output = new String(process.getInputStream().readAllBytes(), UTF_8);
+    assertThat(process.waitFor(10, TimeUnit.SECONDS)).as("hook finished").isTrue();
+    assertThat(process.exitValue()).as("hook exit code, output: %s", output).isZero();
+  }
+
+  private static void deleteTree(Path root) throws IOException {
+    try (Stream<Path> files = Files.walk(root)) {
+      for (Path path : files.sorted(Comparator.reverseOrder()).toList()) {
+        Files.deleteIfExists(path);
+      }
+    }
   }
 }

@@ -47,6 +47,10 @@ if [ -z "${WORKSPACE_WATCHER_URL:-}" ]; then
   # script runs inside every tool call the agent makes. Measured on this machine, one fork costs
   # 2-3 ms, which is a tenth of what the whole hook used to take. Works in bash 3.2, which is what
   # macOS ships and therefore what `#!/usr/bin/env bash` finds on a machine without homebrew.
+  # LC_ALL=C so the expansion counts bytes, as WorkspaceRegistry.spoolFor does; under a UTF-8
+  # locale an accent gave a different name per shell and the spool was never drained. See
+  # docs/collectors.md. The assignment forks nothing.
+  LC_ALL=C
   SPOOL="$BASE/${PROJECT//[!A-Za-z0-9]/-}"
   # Only the first call in a project pays for mkdir; the test is a builtin.
   [ -d "$SPOOL" ] || mkdir -p "$SPOOL" 2>/dev/null || exit 0

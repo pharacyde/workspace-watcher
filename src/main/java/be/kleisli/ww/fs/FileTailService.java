@@ -1,6 +1,7 @@
 package be.kleisli.ww.fs;
 
 import be.kleisli.ww.core.ActiveWorkspace;
+import be.kleisli.ww.core.PathGuard;
 import be.kleisli.ww.core.WatcherProperties;
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -63,8 +64,9 @@ public class FileTailService {
    * Resolves a workspace-relative path, refusing anything that leaves the workspace.
    *
    * <p>The server is loopback-only, but "only I can reach it" is not a reason to serve {@code
-   * ../../.ssh/id_rsa} to whatever asked. Returns null rather than throwing: a path that does not
-   * belong to this workspace is an ordinary answer of "nothing here", not an error.
+   * ../../.ssh/id_rsa} to whatever asked, nor {@code link/id_rsa} through a symlink - hence {@link
+   * PathGuard}. Returns null rather than throwing: a path that does not belong to this workspace is
+   * an ordinary answer of "nothing here", not an error.
    */
   Path resolve(String relativePath) {
     Path workspace = active.get();
@@ -73,7 +75,7 @@ public class FileTailService {
     }
     Path root = workspace.toAbsolutePath().normalize();
     Path file = root.resolve(relativePath).normalize();
-    return file.startsWith(root) ? file : null;
+    return PathGuard.escapes(root, file) ? null : file;
   }
 
   /**

@@ -145,6 +145,38 @@ class FileTailServiceTest {
   }
 
   @Test
+  @DisplayName("refuses a path that leaves the workspace through a symlink")
+  void refusesEscapingThroughASymlink() throws IOException {
+    // normalize().startsWith(root) is satisfied by "link/id_rsa": it normalizes to itself. That was
+    // the whole check here, so `ln -s ~/.ssh link` in a workspace served the key on a server with
+    // no authentication. The diff side had closed the same hole already; this pins the tail side.
+    Path outside = Files.createDirectory(tmp.resolve("outside"));
+    Files.writeString(outside.resolve("secret.txt"), "not yours\n");
+    Files.createSymbolicLink(workspace.resolve("link"), outside);
+
+    assertThat(service.resolve("link/secret.txt")).isNull();
+    assertThat(service.resolve("link/missing.txt")).isNull();
+
+    StepVerifier.create(service.follow("link/secret.txt").take(1))
+        .assertNext(
+            chunk -> {
+              assertThat(chunk.gone()).isTrue();
+              assertThat(chunk.text()).isEmpty();
+            })
+        .verifyComplete();
+
+    // A link that stays inside the workspace is still an ordinary file to read.
+    Path inside = Files.createDirectory(workspace.resolve("logs"));
+    append(inside.resolve("build.log"), "fine\n");
+    Files.createSymbolicLink(workspace.resolve("latest"), inside);
+    assertThat(service.resolve("latest/build.log"))
+        .isEqualTo(workspace.resolve("latest/build.log"));
+    StepVerifier.create(service.follow("latest/build.log").take(1))
+        .assertNext(chunk -> assertThat(chunk.text()).isEqualTo("fine\n"))
+        .verifyComplete();
+  }
+
+  @Test
   @DisplayName("says a file is missing once, and then stops")
   void reportsAMissingFileOnce() {
     // No take(1) here, deliberately: with one the test passed while the subscription went on

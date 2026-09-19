@@ -3,6 +3,7 @@ package be.kleisli.ww.git;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.groups.Tuple.tuple;
 
 import be.kleisli.ww.core.ActiveWorkspace;
 import be.kleisli.ww.core.Shell;
@@ -45,10 +46,8 @@ class GitServiceTest {
 
   private void run(Path directory, String... args) {
     Shell.Result result = Shell.run(directory, List.of(args), 20);
-    // Loud rather than quiet: Shell.run reports a failed command as a result, not an exception,
-    // and a fixture command that failed used to surface only as an assertion three lines later
-    // that said nothing about why. Measured on the Linux CI runner, where a commit inside a fresh
-    // clone fails because git cannot auto-detect an identity there and can on macOS.
+    // Shell.run reports failure as a result, not an exception; a fixture command that failed used
+    // to surface three lines later as an assertion that said nothing about why (docs/testing.md).
     if (!result.ok()) {
       throw new IllegalStateException(
           "fixture command failed ("
@@ -138,6 +137,39 @@ class GitServiceTest {
     assertThat(serviceWatching(module).current().files())
         .extracting(GitService.FileStatus::path)
         .containsExactly("module/inside.txt");
+  }
+
+  @Test
+  @DisplayName("a path with a space or an accent is reported as itself, and can be diffed")
+  void reportsQuotedPathsRaw() throws IOException {
+    // git 2.54 prints these C-quoted in porcelain v1 - ` M "caf\303\251 sp.txt"`, quotes and
+    // octal included - and that string was taken as the path. It resolved to nothing, so the row
+    // diffed to two empty panes with no explanation.
+    Files.writeString(module.resolve("café sp.txt"), "tracked\n");
+    git("add", ".");
+    git("commit", "-m", "accented");
+    Files.writeString(module.resolve("café sp.txt"), "tracked and changed\n");
+    Files.writeString(module.resolve("nieuw é.txt"), "fresh\n");
+    // A rename in -z output is two fields, the new path and then the old; read as one entry per
+    // field, the old name would be listed as a file of its own.
+    git("mv", "module/src/App.java", "module/src/Äpp lication.java");
+
+    GitService service = serviceWatching(repo);
+
+    assertThat(service.current().files())
+        .extracting(GitService.FileStatus::path, GitService.FileStatus::status)
+        .containsExactlyInAnyOrder(
+            tuple("module/café sp.txt", "modified"),
+            tuple("module/nieuw é.txt", "untracked"),
+            tuple("module/src/Äpp lication.java", "renamed"));
+
+    GitService.Versions modified = service.versions("module/café sp.txt");
+    assertThat(modified.head()).isEqualTo("tracked\n");
+    assertThat(modified.working()).isEqualTo("tracked and changed\n");
+
+    GitService.Versions untracked = service.versions("module/nieuw é.txt");
+    assertThat(untracked.head()).isEmpty();
+    assertThat(untracked.working()).isEqualTo("fresh\n");
   }
 
   @Test
@@ -309,10 +341,8 @@ class GitServiceTest {
         "libs/inner");
     run(repo, "git", "commit", "-m", "add submodule");
     Path sub = repo.resolve("libs/inner");
-    // The clone `submodule add` made has no identity of its own; the one set on `inner` above
-    // stayed in that repository's config. On a machine with no global identity - the Linux CI
-    // runner - a commit in here fails, and the test that commits inside the submodule then
-    // measured a commit that never happened.
+    // The clone has no identity of its own; on the Linux CI runner, which has no global one, a
+    // commit in here fails and the test measured a commit that never happened (docs/testing.md).
     run(sub, "git", "config", "user.email", "test@example.com");
     run(sub, "git", "config", "user.name", "Test");
     return sub;

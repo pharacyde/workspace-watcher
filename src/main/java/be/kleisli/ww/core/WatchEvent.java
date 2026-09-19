@@ -24,9 +24,9 @@ public record WatchEvent(
     Long pid,
     String agent,
     String sessionId,
-    /** MCP server this call went to, when it did. Derived from the tool name. */
+    // MCP server this call went to, when it did. Derived from the tool name.
     String mcpServer,
-    /** Kind of subagent this call launched, when it launched one. */
+    // Kind of subagent this call launched, when it launched one.
     String subagent,
     Object detail) {
 

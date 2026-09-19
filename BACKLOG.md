@@ -856,15 +856,15 @@ lane, and MCP servers as their own actors, is nearly free and is exactly the "bl
 exists to open.
 
 **P9-07 Tests and CI** ✅
-*91 tests covering the parsers and the bug classes this project actually hit: the git path
+*91 tests at the time (194 today) covering the parsers and the bug classes this project actually hit: the git path
 resolution that broke when the workspace is a subdirectory, transcript tailing across partial lines
 and multi-byte characters and truncation, `lsof` output including a sibling directory that merely
 shares a prefix, hook payloads that are malformed or enormous, and an event stream that replays
 history then goes live without a gap, a duplicate, or an unbounded buffer. CI builds on JDK 25 and
-26, runs the tests on macOS, and checks that the jar actually starts and answers a query.*
+27 (26 until it left the machine and the matrix), runs the tests on macOS, and checks that the jar actually starts and answers a query.*
 
 **P9-09 Een browsertest, want er is er geen enkele** ✅
-*De backend heeft 142 tests, de frontend nul. Dat is niet waar de bugs zitten: CLAUDE.md documenteert
+*De backend had toen 142 tests (nu 194), de frontend nul. Dat is niet waar de bugs zitten: CLAUDE.md documenteert
 inmiddels vier verschillende fouten in alleen al `followTail` — de virtualizer die zijn eigen
 `scroller` nodig heeft, `scrollToIndex` dat een shim bleek, het eigen scrollen dat de handler
 afvuurde en follow permanent uitzette, en de generatiewacht die tijdens een burst iedereen
@@ -880,7 +880,7 @@ gewoon CDP — het bestaande script is al geschreven. Let op de valkuil die dit 
 build moet eerst draaien, want de assetnamen dragen een hash en een test tegen een oude bundel meet
 de vorige versie.*
 
-*Gedaan. Zeven Playwright-tests, negen seconden, tegen de verpakte jar met een eigen workspace,
+*Gedaan. Zeven Playwright-tests (inmiddels twaalf), negen seconden, tegen de verpakte jar met een eigen workspace,
 database en Claude-home. Hij verdiende zijn plaats op de eerste run: met wrap aan en 160 rijen bleef
 `scrollTop` op 7164 staan terwijl de hoogte naar 8796 gegroeid was — de virtualizer meet asynchroon
 door, dus wie onderaan stond staat dat daarna niet meer, zonder event of render die dat opmerkt.

@@ -126,6 +126,73 @@ class GuardServiceTest {
   }
 
   @Test
+  @DisplayName("a relative path is the agent's, so it resolves against the agent's cwd")
+  void resolvesRelativePathAgainstPayloadCwd() {
+    // Glob and Grep send `path` relative more often than not ("src"), and Path.toAbsolutePath()
+    // resolves it against the watcher's own working directory - a different process, usually in a
+    // different directory. With the outside-workspace rule on, every such call was judged outside
+    // and denied. Claude Code puts the agent's cwd in every hook payload; that is the base.
+    guard.save(new GuardService.Config(true, true, guard.config().rules()));
+
+    assertThat(checkWithCwd("Glob", "path", "src", workspace.toString()).action())
+        .isEqualTo(GuardService.Action.ALLOW);
+    assertThat(
+            checkWithCwd("Grep", "path", "src/main", workspace.resolve("sub").toString()).action())
+        .isEqualTo(GuardService.Action.ALLOW);
+    // Which is not a free pass: the same relative path from a cwd elsewhere is outside.
+    assertThat(checkWithCwd("Glob", "path", "src", "/somewhere/else").action())
+        .isEqualTo(GuardService.Action.DENY);
+  }
+
+  @Test
+  @DisplayName("without a cwd in the payload, a relative path resolves against the workspace")
+  void resolvesRelativePathAgainstWorkspaceWhenCwdAbsent() {
+    guard.save(new GuardService.Config(true, true, guard.config().rules()));
+
+    assertThat(check("Glob", "path", "src").action()).isEqualTo(GuardService.Action.ALLOW);
+    assertThat(check("Edit", "file_path", "../elsewhere/File.java").action())
+        .isEqualTo(GuardService.Action.DENY);
+  }
+
+  @Test
+  @DisplayName("a path glob sees the relative path where the agent means it")
+  void pathGlobMatchesRelativePathAtItsRealLocation() {
+    // The other half of the same mistake: a rule about <workspace>/secrets/** never fired for
+    // `secrets/key.txt`, because the candidate it was compared with lived under the watcher's cwd.
+    guard.save(
+        new GuardService.Config(
+            true,
+            false,
+            List.of(
+                new GuardService.Rule(
+                    GuardService.Kind.PATH,
+                    workspace + "/secrets/**",
+                    GuardService.Action.DENY,
+                    "secrets"))));
+
+    assertThat(checkWithCwd("Read", "file_path", "secrets/key.txt", workspace.toString()).action())
+        .isEqualTo(GuardService.Action.DENY);
+    assertThat(checkWithCwd("Read", "file_path", "secrets/key.txt", "/somewhere/else").action())
+        .isEqualTo(GuardService.Action.ALLOW);
+  }
+
+  @Test
+  @DisplayName("resolving against the cwd never lets a disabled guard block")
+  void cwdResolutionCannotBlockWhileObserving() {
+    guard.save(new GuardService.Config(false, true, guard.config().rules()));
+    assertThat(checkWithCwd("Glob", "path", "src", "/somewhere/else").action())
+        .isEqualTo(GuardService.Action.WARN);
+  }
+
+  private GuardService.Decision checkWithCwd(String tool, String field, String value, String cwd) {
+    return guard.check(
+        """
+        {"tool_name":"%s","session_id":"s1","cwd":"%s","tool_input":{"%s":"%s"}}\
+        """
+            .formatted(tool, cwd, field, value));
+  }
+
+  @Test
   @DisplayName("allows unreadable input rather than blocking on it")
   void failsOpenOnGarbage() {
     // A hook holds the agent until this answers; refusing to parse is not a reason to stop work.

@@ -93,9 +93,16 @@ public class WorkspaceRegistry {
     return true;
   }
 
-  /** Directory name for a workspace: every non-alphanumeric character becomes a dash. */
+  /**
+   * Directory name for a workspace: every non-alphanumeric byte becomes a dash. Byte, not
+   * character, because the hook computes the same name in bash under {@code LC_ALL=C}; a regex over
+   * the string gave one dash fewer per accent and the spool was never drained (collectors.md).
+   */
   public Path spoolFor(Path workspace) {
-    return props.spoolBasePath().resolve(workspace.toString().replaceAll("[^a-zA-Z0-9]", "-"));
+    String bytesAsChars =
+        new String(
+            workspace.toString().getBytes(StandardCharsets.UTF_8), StandardCharsets.ISO_8859_1);
+    return props.spoolBasePath().resolve(bytesAsChars.replaceAll("[^a-zA-Z0-9]", "-"));
   }
 
   private List<Entry> read() {

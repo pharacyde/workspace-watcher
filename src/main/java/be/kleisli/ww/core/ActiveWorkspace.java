@@ -21,7 +21,7 @@ import org.springframework.stereotype.Component;
  * one polling interval with nothing to restart.
  */
 @Component
-public class ActiveWorkspace {
+public final class ActiveWorkspace {
 
   private static final Logger log = LoggerFactory.getLogger(ActiveWorkspace.class);
 
@@ -76,12 +76,7 @@ public class ActiveWorkspace {
   }
 
   private Path rememberedFile() {
-    Path database = Path.of(props.getDatabase()).toAbsolutePath().normalize();
-    Path directory =
-        database.getParent() != null
-            ? database.getParent()
-            : Path.of(System.getProperty("user.dir"));
-    return directory.resolve("active-workspace");
+    return props.sidecarDirectory().resolve("active-workspace");
   }
 
   /** The workspace being observed, or null when none has been chosen yet. */

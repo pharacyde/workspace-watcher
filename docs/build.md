@@ -5,7 +5,8 @@ mistake that was made here, not a style preference.
 
 The commands themselves are in [CLAUDE.md](../CLAUDE.md); this is everything around them.
 
-`mvn package` builds both halves - Maven downloads a pinned node and runs the frontend build.
+`mvn package` builds both halves - Maven downloads a pinned node (`node.version` in `pom.xml`,
+v24.21.0) and runs the frontend build.
 `-DskipFrontend` skips that. Java is formatted by `mvn spotless:apply` (google-java-format, Google
 style); the build fails on anything unformatted.
 

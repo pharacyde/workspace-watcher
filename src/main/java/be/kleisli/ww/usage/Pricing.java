@@ -54,12 +54,7 @@ public class Pricing {
   }
 
   private static Path overrideFile(be.kleisli.ww.core.WatcherProperties props) {
-    Path database = Path.of(props.getDatabase()).toAbsolutePath().normalize();
-    Path directory =
-        database.getParent() != null
-            ? database.getParent()
-            : Path.of(System.getProperty("user.dir"));
-    return directory.resolve("pricing.json");
+    return props.sidecarDirectory().resolve("pricing.json");
   }
 
   private String bundled() {

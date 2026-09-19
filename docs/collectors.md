@@ -44,7 +44,7 @@ was measured and lost. It is not a description of what the collectors do.
   21 ms while this file claimed 5, which is the sort of number that stops being true quietly. Do not "simplify" this to a network call — that trade was measured and lost.
   A WebSocket looks tidier and is strictly worse for the same reason: a hook is a fresh process per
   tool call, so a persistent connection has nothing to amortise and pays its handshake every time,
-  measured at 50 ms plus a node dependency against 5 ms for a file.
+  measured at 50 ms plus a node dependency against what was then 5 ms for a file.
 - **Spool writes must stay atomic.** Write to a temp name, then rename. A reader must never see a
   half-written payload.
 - **The `WORKSPACE_WATCHER_URL` path is for a remote watcher only.** There the body is streamed into
@@ -53,6 +53,18 @@ was measured and lost. It is not a description of what the collectors do.
 - **The spool is a directory per project**, named with the same escaping Claude Code uses for
   transcripts, with a `.workspace` marker holding the real path because the escaping is not
   reversible. That marker is the whole registration mechanism.
+- **The spool name is escaped over bytes, on both sides.** The hook's `${PROJECT//[!A-Za-z0-9]/-}`
+  depends on the locale: measured with `/Users/josé/proj ect`, a UTF-8 locale gave
+  `-Users-josé-proj-ect` from one shell and `-Users-jos--proj-ect` from another, `LC_ALL=C` gave
+  `-Users-jos---proj-ect`, and Java's `replaceAll` over the string gave `-Users-jos--proj-ect`. The
+  drain looked up the last one and every hook event for that project was never picked up, with
+  nothing to say so. `hooks/workspace-watcher-hook.sh` now sets `LC_ALL=C` before the expansion
+  (an assignment, no fork - bash switches its own locale) and `WorkspaceRegistry.spoolFor` widens
+  the path's UTF-8 bytes to one char each (ISO-8859-1 maps bytes 1:1) before the same regex, so
+  both count an accent as two dashes. Neither side normalises Unicode, on purpose: the hook cannot
+  without a fork, and the path it writes into `.workspace` is the one that comes back, so the
+  bytes agree as long as nobody converts them. `WorkspaceRegistryTest` runs the real script under
+  both locales and compares.
 
 ## Scanning the workspace
 
@@ -67,6 +79,21 @@ was measured and lost. It is not a description of what the collectors do.
 - **`watcher.workspace` must stay empty in application.yml.** It was `${user.dir}`, which silently
   overrode the empty Java default: discovery and the remembered workspace never ran, and every test
   that started the app from the repository directory looked like it worked.
+- **`normalize().startsWith(root)` is not a workspace check.** It is lexical: `ln -s ~/.ssh link`
+  in the workspace and `link/id_rsa` normalizes to itself, starts with the root, and the tail served
+  it - measured, on a server that has no authentication precisely because everything it serves is
+  meant to be inside the workspace. The listing side already refused to descend into a symlink;
+  this is the fetch side, which a caller reaches without the listing. The diff side had already
+  closed the same hole, and the tail had its own copy of the check that never heard about it -
+  which is why `GitService.resolveInRepo` and `FileTailService.resolve` now both go through
+  `PathGuard.escapes` in `core` rather than having the fix written a second time.
+  `PathGuard.escapesBySymlink` real-paths the nearest *existing* ancestor, because a deleted file
+  is a normal thing to ask for and has no real path at all. Asking for the link itself is allowed
+  (it is inside the workspace; where it points is the caller's business once it is read), but
+  `link/missing.txt` under a link that points outside is refused even though the file is not there
+  yet: the tail keeps polling and would have served it the moment it appeared. A link that stays
+  inside the workspace still resolves. When `toRealPath` fails the guard says "escapes" - it cannot
+  tell, so it does not claim safety.
 
 ## Processes
 
@@ -125,8 +152,29 @@ was measured and lost. It is not a description of what the collectors do.
   whichever repository actually tracks the file.
 - **In a linked worktree `.git` is a file, not a directory**, so a directory-only ignore filter
   never sees it and it gets reported on every git operation.
+- **`git status` quotes paths unless told not to.** A space or an accent in a name and porcelain v1
+  prints ` M "caf\303\251 sp.txt"` and `?? "sp ace.txt"`, quotes and octal included - measured with
+  git 2.54, and `core.quotepath=false` still quotes the space. That string was taken as the path,
+  resolved to nothing, and the row diffed to two empty panes. Undoing the quoting by hand is a
+  small parser with its own edge cases, so `GitService.collectStatus` passes `-z`, which turns the
+  quoting off entirely; entries then end in NUL instead of newline, and a rename or copy is two
+  fields, new path first, with no ` -> `. The other git calls here are safe: `rev-parse
+  --show-toplevel` prints raw, and `log`, `cat-file` and `show` take paths in rather than printing
+  them out. `GitServiceTest.reportsQuotedPathsRaw` covers all three shapes.
 - **Do not add JGit.** Shelling out to `git` is faster on large repositories and cannot drift from
   what the user sees in their own terminal.
+
+## Guard
+
+- **A relative path is judged from where the agent stands, not the watcher.** Glob and Grep send
+  `path` relative more often than not (`"src"`), and `toAbsolutePath()` resolves against this
+  JVM's working directory - a different process, usually started somewhere else entirely. With
+  `denyOutsideWorkspace` on, every such call was judged outside and denied, and a PATH glob was
+  compared with a location nobody meant. Claude Code puts the agent's `cwd` in every hook payload,
+  so `GuardService.evaluate(filePath, command, cwd)` resolves against that first, then against the
+  workspace being watched, and only when neither exists against the watcher's own directory - and
+  then only because the globs need an absolute path. `GuardServiceTest` covers the first two, and
+  that resolving against the `cwd` still cannot make a disabled guard block (invariant 1b).
 
 ## Storage and the timeline
 
@@ -140,6 +188,13 @@ was measured and lost. It is not a description of what the collectors do.
   rather than when something changes - deliberately, so a steady build still produces a series - so
   the table grows whether anything happens or not: 2833 rows in 2h44m, roughly 740k a month on an
   idle watcher. `event` has had a cap for the same reason all along.
+- **The files beside the database have one address: `WatcherProperties.sidecarDirectory()`.** The
+  remembered workspace (`ActiveWorkspace`), the guard rules (`GuardService`) and the pricing
+  override (`Pricing`) each computed "the parent of the database" themselves, and all three got
+  the empty case wrong in the same way: `Path.of("").toAbsolutePath().getParent()` is not null - it
+  is the parent of the working directory - so the null check never fired and "set `database` to
+  empty to run without history" quietly put those files one level above where the watcher was
+  started. `WatcherPropertiesTest` pins the empty case to the working directory.
 - **Recording must never slow a collector.** `EventStore` queues and flushes on a scheduler, and
   drops the newest events if the queue fills rather than blocking. It also subscribes to the bus
   instead of the bus knowing about it, so storage stays invisible to the thing being stored.

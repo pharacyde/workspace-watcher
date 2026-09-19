@@ -37,8 +37,12 @@ class EventStoreTest {
   private record Wiring(EventBus bus, EventStore store) {}
 
   private Wiring open() {
+    return open(new ActiveWorkspace(props));
+  }
+
+  private Wiring open(ActiveWorkspace active) {
     EventBus bus = new EventBus(props);
-    EventStore store = new EventStore(props, new ActiveWorkspace(props), bus, new ObjectMapper());
+    EventStore store = new EventStore(props, active, bus, new ObjectMapper());
     store.open();
     return new Wiring(bus, store);
   }
@@ -171,8 +175,13 @@ class EventStoreTest {
   @Test
   @DisplayName("runs without persistence when no database is configured")
   void disabledWithoutDatabase() {
+    // The workspace is chosen while the database still points into the temp directory: choosing
+    // it writes the active-workspace sidecar beside the database, and with none configured that
+    // is the working directory - the project root, under Surefire. This test used to leave that
+    // file one level above the project, which is how the sidecar bug was noticed at all.
+    ActiveWorkspace active = new ActiveWorkspace(props);
     props.setDatabase("");
-    Wiring w = open();
+    Wiring w = open(active);
     publish(w.bus(), "nowhere");
     w.store().flush();
 

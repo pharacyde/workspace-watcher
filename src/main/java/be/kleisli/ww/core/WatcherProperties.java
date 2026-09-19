@@ -147,6 +147,20 @@ public class WatcherProperties {
     return Paths.get(spool).toAbsolutePath().normalize();
   }
 
+  /**
+   * Where the small files beside the database go: the remembered workspace, the guard rules, the
+   * pricing override. One place, because three copies each got the empty-database case wrong the
+   * same way: {@code Path.of("").toAbsolutePath().getParent()} is not null (collectors.md).
+   */
+  public Path sidecarDirectory() {
+    Path workingDirectory = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
+    if (database == null || database.isBlank()) {
+      return workingDirectory;
+    }
+    Path parent = Path.of(database).toAbsolutePath().normalize().getParent();
+    return parent != null ? parent : workingDirectory;
+  }
+
   public Path claudeProjectsPath() {
     return Paths.get(claudeHome).toAbsolutePath().normalize().resolve("projects");
   }

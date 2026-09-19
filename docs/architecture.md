@@ -7,7 +7,8 @@ hole in the feed — lessons, not a tour of the design.
 
 ```
 be.kleisli.ww
-├── core     WatchEvent, EventBus, StateStream, ActiveWorkspace, WatcherProperties, Shell, Text
+├── core     WatchEvent, EventBus, StateStream, ActiveWorkspace, WatcherProperties, PathGuard,
+│            Shell, Text
 ├── claude   TranscriptTailService (tails ~/.claude/projects/**/*.jsonl), HookSpoolService (drains
 │            the spool dir), HookEvents (shared parsing), TranscriptLocator, SessionRegistry,
 │            WorkspaceRegistry
@@ -32,7 +33,14 @@ Lessons, not description: each of these is a startup failure or a silent hole th
   use `classpath:graphql/**`. `dgs.graphql.schema-locations` points it at the one real file; without
   it the context fails with "Parent type Query not found".
 - **json-path is pinned to 3.0.0.** DGS 12 wires `Jackson3JsonProvider`, which first ships there,
-  while Spring Boot 4.1.1 manages 2.10.0. Without the override the context fails to start.
+  while Spring Boot 4.1.1 manages 2.10.0. Without the override the context fails to start. DGS
+  12.1.0's BOM now pins it too; the override in `pom.xml` stays so a DGS release that drops it
+  cannot bring the failure back.
+- **Tomcat is overridden to 11.0.26** for three CVEs in the 11.0.24 that Spring Boot 4.1.1
+  manages. The `tomcat.version` property in `pom.xml` says which, and goes when a Boot release
+  manages 11.0.26 or later.
+- **DGS codegen generates data types only.** `generateClientApi` is off in `pom.xml`; the frontend
+  has its own codegen, and a Java client for the server's own schema would be dead code.
 - **Do not mix DGS and Spring for GraphQL annotations.** Netflix's own guidance is explicit that
   some features do not work across both models. Everything here is DGS.
 - **The subscription must not have a gap.** `EventBus.stream()` snapshots history and registers the

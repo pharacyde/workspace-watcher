@@ -197,7 +197,7 @@ choice is worth explaining, because the obvious alternatives are both worse. Mea
 
 | transport | cost per tool call | dependencies | survives watcher being down |
 |---|---|---|---|
-| **spool file** (default) | **~5 ms** | none | **yes — waits on disk** |
+| **spool file** (default) | **~6 ms** | none | **yes — waits on disk** |
 | GraphQL mutation over HTTP | 20 ms | curl | no, event is lost |
 | graphql-ws subscription | 50 ms | node or websocat | no, event is lost |
 
@@ -434,11 +434,16 @@ build fails on anything unformatted, so style never becomes review chatter.
 
 ```
 be.kleisli.ww
-├── core     WatchEvent, EventBus (ring buffer + fan-out), WatcherProperties, Shell
-├── claude   TranscriptTailService (layer 1a), HookSpoolService + HookEvents (layer 1b)
-├── fs       WorkspaceScanService (layer 2)
+├── core     WatchEvent, EventBus (ring buffer + fan-out), ActiveWorkspace, WatcherProperties,
+│            PathGuard, Shell
+├── claude   TranscriptTailService (layer 1a), HookSpoolService + HookEvents (layer 1b),
+│            SessionRegistry, WorkspaceRegistry
+├── fs       WorkspaceScanService (layer 2), FileTailService, FileChangeService
 ├── git      GitService — shells out to git rather than embedding JGit
 ├── proc     ProcessTreeService — lsof + ProcessHandle
+├── guard    GuardService — the one hook that may block, off by default
+├── store    EventStore — SQLite history
+├── usage    UsageService, Pricing, Billing — tokens and what they would cost
 └── web      WatchDataFetcher (DGS), ApiMapper (domain → generated wire types)
 ```
 
@@ -450,16 +455,17 @@ is DGS annotations.
 
 The frontend is **Lit** web components in TypeScript, built by Vite. Lit is 5.9 kB gzipped against
 roughly 45 kB for React and DOM libraries, has no virtual DOM to diff on every event, and the whole
-entry bundle comes to 82 kB (25 kB gzipped) — Monaco is code-split and only fetched when a file is
+entry bundle comes to 155 kB (42 kB gzipped) — Monaco is code-split and only fetched when a file is
 first opened.
 
 Events arriving from the subscription are batched onto one animation frame rather than rendered
 individually, and the feed is virtualised. Under a real build the bottleneck is never the
 transport; it is the DOM.
 
-There are three subscriptions, and the split between them is what keeps the dashboard readable.
-`events` is a chronicle of things that happened; `gitStatus` and `processTree` are current state and
-emit their present value the moment you subscribe. Mixing the two was the original design, and
+The subscriptions come in two kinds, and the split between them is what keeps the dashboard
+readable. `events` is a chronicle of things that happened; the others — `gitStatus`, `processTree`,
+`workspaces`, `sessions`, `activeWorkspace` — are current state and emit their present value the
+moment you subscribe. Mixing the two was the original design, and
 measured at 91% of all events being process snapshots that said nothing — they filled the replay
 buffer and pushed real history out of it.
 
@@ -478,8 +484,8 @@ reframe, or blocked, and why.
 build, and the jar. CI additionally builds on JDK 25 as well as 27, and runs the tests on macOS —
 the platform the process layer is actually written against.
 
-`cd frontend && npm run test:e2e` adds a Playwright smoke test that starts the packaged jar and
-loads the dashboard in Chromium; package first, since it tests whatever bundle the jar contains.
+`cd frontend && npm run test:e2e` adds a Playwright smoke suite that starts the packaged jar and
+drives the dashboard in Chromium; package first, since it tests whatever bundle the jar contains.
 
 ## License
 

@@ -1,6 +1,7 @@
 package be.kleisli.ww.git;
 
 import be.kleisli.ww.core.ActiveWorkspace;
+import be.kleisli.ww.core.PathGuard;
 import be.kleisli.ww.core.Shell;
 import be.kleisli.ww.core.StateStream;
 import be.kleisli.ww.core.WatcherProperties;
@@ -223,45 +224,12 @@ public class GitService {
       throw new IllegalStateException("no workspace is being watched");
     }
     Path resolved = repoRoot.resolve(relativePath).normalize();
-    if (!resolved.startsWith(repoRoot) || escapesBySymlink(repoRoot, resolved)) {
+    // The symlink half of this check lives in PathGuard because the file tail needed the same
+    // one; see there for what the lexical test alone let through.
+    if (PathGuard.escapes(repoRoot, resolved)) {
       throw new IllegalArgumentException("path outside repository");
     }
     return resolved;
-  }
-
-  /**
-   * Whether a path that is lexically inside the repository leaves it on disk.
-   *
-   * <p>{@code normalize()} is purely lexical: with {@code link -> /somewhere/else} in the
-   * repository, {@code link/secret.txt} normalizes to itself, starts with the root, and was read
-   * and served - measured, on a server that has no authentication precisely because everything it
-   * serves is meant to be inside the workspace. The listing side already refuses to descend into a
-   * symlink; this is the fetch side, which a caller reaches without the listing.
-   *
-   * <p>The nearest existing ancestor rather than the path itself, because a deleted file is a
-   * normal thing to ask for here and has no real path at all.
-   */
-  private static boolean escapesBySymlink(Path repoRoot, Path resolved) {
-    try {
-      Path existing = resolved;
-      while (!Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
-        existing = existing.getParent();
-        if (existing == null) {
-          return false;
-        }
-      }
-      // The parent of a symlink, so that asking for the link itself is still allowed: it is inside
-      // the repository, and what it resolves to is the caller's business only once it is read.
-      Path real =
-          Files.isSymbolicLink(existing)
-              ? existing.getParent().toRealPath()
-              : existing.toRealPath();
-      return !real.startsWith(repoRoot.toRealPath());
-    } catch (IOException e) {
-      // Cannot tell, so do not claim it is safe.
-      log.debug("cannot real-path {}: {}", resolved, e.toString());
-      return true;
-    }
   }
 
   private Snapshot read() {
@@ -312,6 +280,10 @@ public class GitService {
     // after an edit. An agent running `git add` or `git commit` in the same repository at that
     // moment fails outright with "Unable to create '.git/index.lock': File exists", which is
     // invariant 1 broken by the observer. The flag tells git to do the read-only thing instead.
+    //
+    // -z because otherwise git C-quotes a path with a space or an accent and the row diffed to two
+    // empty panes; core.quotepath=false still quotes the space. Entries end in NUL and a rename is
+    // two entries, new path first. See docs/collectors.md.
     Shell.Result status =
         Shell.run(
             directory,
@@ -320,21 +292,24 @@ public class GitService {
                 "--no-optional-locks",
                 "status",
                 "--porcelain=v1",
+                "-z",
                 "--untracked-files=all",
                 "--",
                 "."),
             15);
-    for (String line : status.lines()) {
+    String[] entries = status.stdout().split("\0");
+    for (int i = 0; i < entries.length; i++) {
+      String line = entries[i];
       if (line.length() < 4) {
         continue;
       }
       char index = line.charAt(0);
       char worktree = line.charAt(1);
       String path = line.substring(3);
-      // Renames are reported as "old -> new"; the new path is the one worth showing.
-      int arrow = path.indexOf(" -> ");
-      if (arrow >= 0) {
-        path = path.substring(arrow + 4);
+      // A rename or copy carries the old path as the next field; the new one is what is shown,
+      // and the old one must not be read as an entry of its own.
+      if (index == 'R' || index == 'C' || worktree == 'R' || worktree == 'C') {
+        i++;
       }
       // An untracked nested repository is reported with a trailing slash - "?? tool/" - which
       // would otherwise become "tool//b.txt" once it is used as a prefix.

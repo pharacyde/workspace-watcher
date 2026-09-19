@@ -79,6 +79,7 @@ Comments say *why*, especially where an obvious-looking alternative was rejected
 constructor injection for services; no Lombok.
 
 **Read [docs/conventions.md](docs/conventions.md) before adding a dependency or reaching for
-Lombok.** Lombok is not a taste question here: version 1.18.46 silently generates nothing on JDK 26,
-so `@Getter` compiles and the getter does not exist. A new dependency needs a reason that survives
+Lombok.** Lombok is not a taste question here: version 1.18.46 silently generated nothing on JDK 26
+(measured when that was the development JDK; it is 27 now), so `@Getter` compiles and the getter
+does not exist. A new dependency needs a reason that survives
 the "can the JDK already do this" question.

@@ -156,12 +156,7 @@ public class GuardService {
   }
 
   private Path configFile() {
-    Path database = Path.of(props.getDatabase()).toAbsolutePath().normalize();
-    Path directory =
-        database.getParent() != null
-            ? database.getParent()
-            : Path.of(System.getProperty("user.dir"));
-    return directory.resolve("guard.json");
+    return props.sidecarDirectory().resolve("guard.json");
   }
 
   /**
@@ -183,8 +178,9 @@ public class GuardService {
     JsonNode input = payload.path("tool_input");
     String filePath = firstNonBlank(input, "file_path", "notebook_path", "path");
     String command = input.path("command").asString(null);
+    String cwd = firstNonBlank(payload, "cwd");
 
-    Decision matched = evaluate(filePath, command);
+    Decision matched = evaluate(filePath, command, cwd);
 
     // While observing, a DENY is reported as a WARN to the caller. The hook blocks on DENY and
     // nothing else, so this is what makes "off" actually mean off: the rule is still evaluated and
@@ -212,9 +208,12 @@ public class GuardService {
     return decision;
   }
 
-  Decision evaluate(String filePath, String command) {
+  /**
+   * @param cwd the agent's working directory from the hook payload, or null when it is absent
+   */
+  Decision evaluate(String filePath, String command, String cwd) {
     if (filePath != null) {
-      Path candidate = Path.of(filePath).toAbsolutePath().normalize();
+      Path candidate = resolve(filePath, cwd);
       for (Rule rule : config.rules()) {
         if (rule.kind() == Kind.PATH && matchesGlob(rule.pattern(), candidate)) {
           return new Decision(rule.action(), rule.reason(), rule.pattern());
@@ -234,6 +233,22 @@ public class GuardService {
       }
     }
     return new Decision(Action.ALLOW, null, null);
+  }
+
+  /**
+   * Absolute from where the agent stands, not the watcher: Glob and Grep send {@code path}
+   * relative, and {@code toAbsolutePath()} against this JVM's directory judged every one of them
+   * outside the workspace. The payload's {@code cwd} first, then the workspace (collectors.md).
+   */
+  private Path resolve(String filePath, String cwd) {
+    Path path = Path.of(filePath);
+    if (!path.isAbsolute()) {
+      Path base = cwd != null ? Path.of(cwd) : active.get();
+      if (base != null) {
+        path = base.resolve(path);
+      }
+    }
+    return path.toAbsolutePath().normalize();
   }
 
   private static boolean matchesGlob(String pattern, Path path) {
