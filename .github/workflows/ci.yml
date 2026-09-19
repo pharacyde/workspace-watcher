@@ -30,7 +30,9 @@ jobs:
 
       - uses: actions/setup-java@v5
         with:
-          distribution: temurin
+          # Zulu rather than Temurin: Temurin stops at 26 for now, Zulu ships 27 GA for both
+          # Linux and macOS, and it is what development happens on.
+          distribution: zulu
           java-version: ${{ matrix.java }}
           cache: maven
 
@@ -71,7 +73,7 @@ jobs:
 
       - uses: actions/setup-java@v5
         with:
-          distribution: temurin
+          distribution: zulu
           java-version: '27'
 
       # Playwright itself only needs a node to run under; the pinned node the Maven build downloads
@@ -131,7 +133,7 @@ jobs:
 
       - uses: actions/setup-java@v5
         with:
-          distribution: temurin
+          distribution: zulu
           java-version: '27'
           cache: maven
 
