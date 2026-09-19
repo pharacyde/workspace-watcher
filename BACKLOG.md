@@ -813,6 +813,66 @@ alleen bij een nieuwe sleutel of nieuwe events opnieuw loopt. Let op een ongeldi
 terugvallen op substring, niet op een lege feed.*
 
 
+## Epic 18 — Wat een agent naar buiten stuurt
+
+*Uit een spike op 19 sep 2026. De vraag was of we kunnen zien wanneer een agent persoonsgegevens of
+secrets naar een remote stuurt. Het antwoord begint met een meting die het ontwerp inhaalt: in
+`events.db` staan vandaag, in platte tekst en zonder auth geserveerd, een echt GitHub-token uit een
+env-dump, acht npm-JWT's en zes database-URL's met wachtwoord - 138.199 HOOK/TRANSCRIPT-rijen
+gescand in 53 s met zestien Java-regexes, en daarna met `LIKE` nageteld. Wat de agent stuurt is op
+laag 1 exact zichtbaar (`Bash.command`, `WebFetch.url`, `WebSearch.query`, MCP-input) en wat
+terugkwam ook; wat een gestart proces of een stdio-MCP-server zelf verstuurt niet, en dat blijft
+P9-04. Volgorde: eerst P18-02 (het lek in de eigen opslag), dan P18-01, dan pas P18-03.*
+
+**P18-01 Secrets en PII in de opgenomen events, achteraf** 🟢 — een dag
+*Een `SensitiveContentScanner` in `guard` die als bus-abonnee naast `EventStore` elk HOOK- en
+TRANSCRIPT-event scant (ook `TOOL_RESULT`, want dat is wat naar het model ging) en per treffer een
+GUARD-event `SENSITIVE_OUTBOUND` (remote-doel in de call) of `SENSITIVE_CONTENT` publiceert met
+regelnaam, bron-`seq` en een excerpt van vier tekens - nooit de match. Zestien regels: AWS/GCP/
+GitHub/Slack/Anthropic-sleutels, private-key-header, JWT, `password=`, Authorization-header, URL
+met userinfo, e-mail, IBAN, rijksregisternummer met controlegetal, Belgisch gsm-nummer. Gemeten:
+0,19 ms per kB payload, 1,0 ms per 6 kB, dus 1-2 s achter de tool-call (spool 200 ms + flush
+500 ms). Twee gemeten voorwaarden: elke regel begrensd en possessive (een 5 kB-blob kostte 65 ms
+met `[…]*://`, 0,8 ms met `{0,15}+`), en de entropie-regel eruit - 56% van de rijen raak, allemaal
+paden en ids. Scan vóór `Text.truncate`, anders is de dekking van een 20 kB result 20%. Feed en
+timeline tonen ze als GUARD; `Status` krijgt de teller. Geen namen: dat is NER, geen regex.*
+
+**P18-02 Redacteren bij opname, en de geschiedenis nalopen** 🟢 — een dag, eerst
+*Secrets-regels (vaste prefix: 0 valse treffers op 138k rijen) vervangen de match in `detail` door
+`‹regel:xxxx…›` vóór `bus.publish`, in `HookEvents` en `TranscriptTailService`; PII-regels flaggen
+alleen, want KBO-nummers lijken op gsm-nummers en Lambert-coördinaten halen 1 op 97 keer het
+RRN-controlegetal. Eén mutatie `redactHistory` loopt bestaande rijen na op de flush-thread, in
+batches zoals de prune (0,4 ms per rij; de 392 MB hier ≈ 1 minuut). Eerlijk erbij in de README:
+Claude Code's eigen transcript in `~/.claude/projects` houdt het secret toch; dit haalt het uit de
+tweede kopie die zonder auth wordt geserveerd (invariant 4).*
+
+**P18-03 CONTENT-regel in de guard, vooraf** 🟡 — een week
+*Derde `GuardRuleKind`: scant `tool_input` alleen wanneer de call remote is - Bash met upload-verbum
+(`curl -d/-F/-T`, `scp`, `rsync host:`, `git push`, `gh api`, `aws s3 cp`, `npm publish`),
+`WebFetch`, `WebSearch`, en MCP-servers die in `.mcp.json` `type: http` hebben. Host uit URL of
+`user@host:`; allowlist = loopback, `*.local`, hosts uit `git remote -v`, plus configuratie. Scan
+< 1 ms achter een `Future.get(50 ms)`; time-out is ALLOW plus SYSTEM-event, en `check()` blijft DENY
+naar WARN downgraden zolang `enabled` uit staat (invariant 1b). 🟡 omdat "blokkeer PII naar een
+remote" te veel belooft: `curl -T bestand` toont een naam en geen inhoud (het bestand tot 256 kB
+meelezen via `PathGuard` kan, geschat 1-3 ms), `$TOKEN` in een header is onzichtbaar, en een script
+dat zelf POST ook. Hoort in de regel-UI van P13-04, met wat elke regel de laatste tijd raakte.*
+
+**P18-04 gitleaks als tweede mening, async** 🟢 — een halve dag, optioneel
+*Staat op deze machine (8.30.1, MIT): 18 ms per proces op een hook-payload, dus nooit in de hook,
+wel bruikbaar als nachtelijke of on-demand doorloop met zijn ~150 regels en allowlist. Gemeten
+beperking: vond 3 van 6 geplante secrets (de private-key-regel wil het hele blok, het canonieke
+AWS-voorbeeld staat op zijn allowlist) en kent geen enkele PII-regel. Alleen als P18-01 te weinig
+blijkt te vinden; trufflehog niet, want die verifieert credentials online en is zélf uitgaand
+verkeer.*
+
+**P18-05 Echte egress-attributie** 🔴
+*Wat een door de agent gestart proces, een stdio-MCP-server of een `WebFetch` daadwerkelijk over het
+netwerk stuurt is op macOS zonder Network Extension of Endpoint Security (root, Apple-entitlement)
+niet te zien; `lsof -i` toont een open socket zonder inhoud. Zie P9-04. Dit item bestaat om vast te
+leggen dat "de agent stuurde X naar Y" op laag 1 een uitspraak is over de payload, niet over het
+pakket (invariant 2), en dat de README dat zo moet zeggen.*
+
+
 ## Epic 9 — Added: what the original list did not cover
 
 **P9-01 Event persistence (SQLite)** ✅
