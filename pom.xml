@@ -19,19 +19,27 @@
 
   <properties>
     <java.version>25</java.version>
-    <dgs.version>12.0.1</dgs.version>
-    <dgs-codegen.version>3.9.0</dgs-codegen.version>
-    <spotless.version>3.10.1</spotless.version>
+    <dgs.version>12.1.0</dgs.version>
+    <dgs-codegen.version>3.10.1</dgs-codegen.version>
+    <spotless.version>3.10.2</spotless.version>
     <!--
       DGS 12 wires json-path's Jackson3JsonProvider, which first ships in json-path 3.0.0.
       Spring Boot 4.1.1 manages 2.10.0, so without this override the context fails to start with
-      NoClassDefFoundError: com/jayway/jsonpath/spi/json/Jackson3JsonProvider.
+      NoClassDefFoundError: com/jayway/jsonpath/spi/json/Jackson3JsonProvider. DGS 12.1.0's BOM
+      pins 3.0.0 itself; the override stays so a DGS release that drops the pin cannot bring the
+      failure back.
     -->
     <json-path.version>3.0.0</json-path.version>
+    <!--
+      Spring Boot 4.1.1 manages Tomcat 11.0.24, which carries CVE-2026-65182, -65905 and -68525;
+      the DGS BOM pinned log4j-api 2.25.3 (CVE-2026-49844) until 12.1.0. Drop this override once
+      a Boot release manages 11.0.26 or later.
+    -->
+    <tomcat.version>11.0.26</tomcat.version>
     <sqlite-jdbc.version>3.53.4.0</sqlite-jdbc.version>
     <frontend-maven-plugin.version>2.0.2</frontend-maven-plugin.version>
     <maven-clean-plugin.version>3.5.0</maven-clean-plugin.version>
-    <node.version>v22.15.0</node.version>
+    <node.version>v24.21.0</node.version>
     <!-- mvn package -DskipFrontend to build the backend alone. -->
     <skipFrontend>false</skipFrontend>
     <google-java-format.version>1.36.1</google-java-format.version>
@@ -126,7 +134,7 @@
             <param>src/main/resources/graphql/schema.graphqls</param>
           </schemaPaths>
           <packageName>be.kleisli.ww.generated</packageName>
-          <generateClient>false</generateClient>
+          <generateClientApi>false</generateClientApi>
           <generateDataTypes>true</generateDataTypes>
         </configuration>
       </plugin>

@@ -16,14 +16,14 @@ permissions:
 
 jobs:
   build:
-    # Both JDKs the README promises. 26 is what development happens on; 25 is the LTS the build
+    # Both JDKs the README promises. 27 is what development happens on; 25 is the LTS the build
     # targets with `release 25`, and until this runs that claim is untested.
     name: build (JDK ${{ matrix.java }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        java: ['25', '26']
+        java: ['25', '27']
 
     steps:
       - uses: actions/checkout@v5
@@ -50,7 +50,7 @@ jobs:
         run: mvn --batch-mode --no-transfer-progress verify
 
       - name: Upload the jar
-        if: matrix.java == '26'
+        if: matrix.java == '27'
         uses: actions/upload-artifact@v4
         with:
           name: workspace-watcher
@@ -61,7 +61,7 @@ jobs:
     # One runner, one JDK, once. The browser test loads the built bundle over HTTP and asserts the
     # dashboard renders; nothing in it depends on the JDK the jar was compiled with, so running it
     # in every matrix combination would download a browser and boot the app twice for the same
-    # answer. It takes the jar the JDK 26 build already uploaded rather than rebuilding it.
+    # answer. It takes the jar the JDK 27 build already uploaded rather than rebuilding it.
     name: browser smoke test
     runs-on: ubuntu-latest
     needs: build
@@ -72,13 +72,13 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '26'
+          java-version: '27'
 
       # Playwright itself only needs a node to run under; the pinned node the Maven build downloads
       # exists so the shipped bundle is byte-identical everywhere, which does not apply here.
       - uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -132,7 +132,7 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '26'
+          java-version: '27'
           cache: maven
 
       # Skips the frontend: it is platform-independent and the Linux job already builds it.

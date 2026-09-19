@@ -8,7 +8,7 @@ A Spring Boot web app that observes what AI agents do inside a workspace folder.
 Requires JDK 25+. The default `java` on this machine may be older, so set `JAVA_HOME` explicitly:
 
 ```bash
-export JAVA_HOME=$(/usr/libexec/java_home -v 26)
+export JAVA_HOME=$(/usr/libexec/java_home -v 27)
 mvn -B -DskipTests package
 cp target/*.jar target/run/watcher.jar
 $JAVA_HOME/bin/java -jar target/run/watcher.jar --watcher.workspace=/path/to/observe

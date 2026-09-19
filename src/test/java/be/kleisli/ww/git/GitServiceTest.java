@@ -44,7 +44,20 @@ class GitServiceTest {
   }
 
   private void run(Path directory, String... args) {
-    Shell.run(directory, List.of(args), 20);
+    Shell.Result result = Shell.run(directory, List.of(args), 20);
+    // Loud rather than quiet: Shell.run reports a failed command as a result, not an exception,
+    // and a fixture command that failed used to surface only as an assertion three lines later
+    // that said nothing about why. Measured on the Linux CI runner, where a commit inside a fresh
+    // clone fails because git cannot auto-detect an identity there and can on macOS.
+    if (!result.ok()) {
+      throw new IllegalStateException(
+          "fixture command failed ("
+              + result.exitCode()
+              + "): "
+              + List.of(args)
+              + "\n"
+              + result.stdout());
+    }
   }
 
   private GitService serviceWatching(Path workspace) {
@@ -295,7 +308,14 @@ class GitServiceTest {
         inner.toString(),
         "libs/inner");
     run(repo, "git", "commit", "-m", "add submodule");
-    return repo.resolve("libs/inner");
+    Path sub = repo.resolve("libs/inner");
+    // The clone `submodule add` made has no identity of its own; the one set on `inner` above
+    // stayed in that repository's config. On a machine with no global identity - the Linux CI
+    // runner - a commit in here fails, and the test that commits inside the submodule then
+    // measured a commit that never happened.
+    run(sub, "git", "config", "user.email", "test@example.com");
+    run(sub, "git", "config", "user.name", "Test");
+    return sub;
   }
 
   @Test

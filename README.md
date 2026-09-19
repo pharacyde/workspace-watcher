@@ -475,7 +475,7 @@ reframe, or blocked, and why.
 ## Contributing
 
 `mvn verify` runs everything CI runs: `google-java-format` through Spotless, the tests, the frontend
-build, and the jar. CI additionally builds on JDK 25 as well as 26, and runs the tests on macOS —
+build, and the jar. CI additionally builds on JDK 25 as well as 27, and runs the tests on macOS —
 the platform the process layer is actually written against.
 
 `cd frontend && npm run test:e2e` adds a Playwright smoke test that starts the packaged jar and

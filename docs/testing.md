@@ -4,7 +4,7 @@ What CI runs, and the rules that decide whether a run means anything. The last t
 they are why a green run once measured the wrong bundle.
 
 `mvn verify` runs what CI runs: Spotless, the tests, the frontend build, and the jar. CI
-(`.github/workflows/ci.yml`) builds on JDK 25 and 26 — 26 is what development happens on, 25 is the
+(`.github/workflows/ci.yml`) builds on JDK 25 and 27 — 27 is what development happens on, 25 is the
 LTS the build targets and the minimum the README promises — and runs the tests on macOS as well,
 because that is the platform the process layer is written against and a green Linux build says
 less here than it usually would. Standard runners are free on public repositories.
@@ -27,6 +27,6 @@ of the Java tests ever execute the JavaScript.
 content hash and `emptyOutDir` removes the old ones, so a jar built before your change serves a
 different bundle than the one you are testing, and the test measures the previous version while
 looking green. `mvn -DskipTests package` first, or the run means nothing. CI takes the jar the
-JDK 26 build uploaded for exactly that reason, and runs the browser test once on one runner rather
+JDK 27 build uploaded for exactly that reason, and runs the browser test once on one runner rather
 than in every matrix combination — the bundle does not vary by JDK, and the browser download does
 not need paying for twice.
