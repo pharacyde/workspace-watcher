@@ -314,14 +314,14 @@ public class WatchDataFetcher {
   }
 
   /** Removes a workspace registration. The project itself is never touched. */
-  /** Contract for Epic 18; filled in by P18-01. */
+  // Contract for Epic 18; filled in by P18-01.
   @DgsQuery
   public List<be.kleisli.ww.generated.types.WatchEvent> sensitiveEvents(
       @InputArgument Integer limit) {
     return List.of();
   }
 
-  /** Contract for Epic 18; filled in by P18-02. */
+  // Contract for Epic 18; filled in by P18-02.
   @DgsMutation
   public double redactHistory() {
     return 0;
