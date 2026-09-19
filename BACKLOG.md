@@ -874,7 +874,10 @@ een token op de knip valt binnen de marge. Het event draagt de regelnamen in `de
 UPDATE van wat veranderde: 50k rijen in 0,7 s, en een flush die intussen aankwam wachtte hoogstens
 10 ms - de eerste versie van die test flushte in een strakke lus en deed er 71 s over, wat de
 onbillijkheid van een Java-monitor mat en niet de store. De marker houdt vier tekens, dus wie op
-een gelekt token zoekt moet het token zoeken en niet zijn prefix.*
+een gelekt token zoekt moet het token zoeken en niet zijn prefix. Uitgevoerd op de echte database op 19 sep 2026: 411 rijen herschreven in
+79 s over 193.577 rijen - 0,4 ms per rij, zoals de spike mat - waarna geen enkel volledig
+GitHub-token meer voorkomt en de npm-JWT's weg zijn; wat een ruwe `LIKE` daarna nog vond waren
+JDBC-URL's zonder userinfo en de markers zelf.*
 
 **P18-03 CONTENT-regel in de guard, vooraf** 🟡 — een week
 *Derde `GuardRuleKind`: scant `tool_input` alleen wanneer de call remote is - Bash met upload-verbum
