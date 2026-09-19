@@ -379,12 +379,23 @@ type Status {
   transcriptDirs: [String!]!
   "What the watcher itself has let fall, so a feed that looks complete can say when it is not."
   loss: Loss!
+  """
+  Secrets and personal data seen in what an agent sent or received since start (Epic 18). A count
+  of GUARD events of type SENSITIVE_OUTBOUND and SENSITIVE_CONTENT; the events themselves say which
+  rule, in which tool, towards which host - never the matched text.
+  """
+  sensitive: Float!
   git: GitSnapshot!
   processes: ProcessSnapshot!
 }
 
 type Query {
   status: Status!
+  """
+  The recorded SENSITIVE_OUTBOUND and SENSITIVE_CONTENT events of the active workspace, newest
+  first. The archive rather than the live buffer, so a hit from last week is still there.
+  """
+  sensitiveEvents(limit: Int): [WatchEvent!]!
   """
   Both sides of a file. The path is as gitStatus reports it, relative to the repository root.
 
@@ -463,6 +474,13 @@ type Query {
 }
 
 type Mutation {
+  """
+  Walks the recorded history once and replaces every secret the scanner recognises with its redacted
+  form, the way new events are redacted at record time. Returns how many rows changed. Runs on the
+  flush thread in batches, so a collector never waits on it.
+  """
+  redactHistory: Float!
+
   """
   Points the watcher at a workspace. It takes effect within one polling interval; nothing restarts.
 

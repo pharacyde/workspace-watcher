@@ -137,6 +137,7 @@ public class WatchDataFetcher {
             Loss.newBuilder().history((double) store.dropped()).stream(
                     (double) eventBus.droppedForSlowSubscribers())
                 .build())
+        .sensitive(0.0)
         .git(mapper.toGitSnapshot(git.current()))
         .processes(mapper.toProcessSnapshot(processes.currentSnapshot()))
         .build();
@@ -313,6 +314,19 @@ public class WatchDataFetcher {
   }
 
   /** Removes a workspace registration. The project itself is never touched. */
+  /** Contract for Epic 18; filled in by P18-01. */
+  @DgsQuery
+  public List<be.kleisli.ww.generated.types.WatchEvent> sensitiveEvents(
+      @InputArgument Integer limit) {
+    return List.of();
+  }
+
+  /** Contract for Epic 18; filled in by P18-02. */
+  @DgsMutation
+  public double redactHistory() {
+    return 0;
+  }
+
   @DgsMutation
   public boolean forgetWorkspace(@InputArgument String path) {
     return registry.forget(path);
