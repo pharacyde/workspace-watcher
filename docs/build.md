@@ -32,6 +32,11 @@ needs a class it can no longer load. Copy it somewhere `mvn clean` does not reac
 `~/.claude/workspace-watcher/run/watcher.jar`, beside the database - and start that one: a copy
 under `target/run` survived a rebuild and then went the same way on the next `mvn clean`.
 
+The jar's manifest carries `Enable-Native-Access: ALL-UNNAMED` (`maven-jar-plugin` in `pom.xml`):
+sqlite-jdbc loads a native library, and from JDK 24 (JEP 472) that prints four warnings on every
+start and is announced to become a refusal. In the manifest so that no command line, launcher or
+Playwright config has to remember a flag.
+
 Start it with `-Xmx256m`. Without a cap G1 takes a quarter of the machine as its ceiling and
 never gives eden back: measured 1.42 GB RSS and 1.17 GB committed for 35 MB of live data after
 five minutes. With the cap, 373 MB RSS, and the heaviest query (`history(limit: 20000)`, 14 MB)
