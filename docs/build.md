@@ -28,4 +28,11 @@ Run it from a **copy** of the jar, not from `target/` itself. A Spring Boot fat 
 pulls the file out from under the running JVM. It does not fail at once: the pages already served
 keep working, and then a refresh hangs while the log fills with
 `NoClassDefFoundError: ch/qos/logback/classic/spi/ThrowableProxy`, because even Tomcat's error path
-needs a class it can no longer load. `cp target/*.jar target/run/watcher.jar` and start that one.
+needs a class it can no longer load. Copy it somewhere `mvn clean` does not reach -
+`~/.claude/workspace-watcher/run/watcher.jar`, beside the database - and start that one: a copy
+under `target/run` survived a rebuild and then went the same way on the next `mvn clean`.
+
+Start it with `-Xmx256m`. Without a cap G1 takes a quarter of the machine as its ceiling and
+never gives eden back: measured 1.42 GB RSS and 1.17 GB committed for 35 MB of live data after
+five minutes. With the cap, 373 MB RSS, and the heaviest query (`history(limit: 20000)`, 14 MB)
+takes the same 290 ms as before - GC was 0.03% of the time either way (P11-12).

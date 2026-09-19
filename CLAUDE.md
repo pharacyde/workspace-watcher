@@ -10,15 +10,17 @@ Requires JDK 25+. The default `java` on this machine may be older, so set `JAVA_
 ```bash
 export JAVA_HOME=$(/usr/libexec/java_home -v 27)
 mvn -B -DskipTests package
-cp target/*.jar target/run/watcher.jar
-$JAVA_HOME/bin/java -jar target/run/watcher.jar --watcher.workspace=/path/to/observe
+mkdir -p ~/.claude/workspace-watcher/run && cp target/*.jar ~/.claude/workspace-watcher/run/watcher.jar
+$JAVA_HOME/bin/java -Xmx256m -jar ~/.claude/workspace-watcher/run/watcher.jar --watcher.workspace=/path/to/observe
 ```
 
 Compiled with `-Xlint:all`; keep the build warning-free.
 
 **Read [docs/build.md](docs/build.md) before changing the build or running the app any other way.**
-The copy above is not a habit: rebuilding while the app runs pulls the jar out from under the
-running JVM, and it does not fail until the next refresh hangs. That file also has the dev server,
+The copy above is not a habit, and it lives outside `target/` on purpose: rebuilding while the app
+runs pulls the jar out from under the running JVM, and it does not fail until the next refresh
+hangs - and `mvn clean` does the same to a copy under `target/run`. `-Xmx256m` is measured, not
+taste. That file also has the dev server,
 why Spring Boot 4 means Jackson 3 rather than the package every example imports, and the emptying
 of `target/classes/static` without which every old bundle stays in the jar forever.
 

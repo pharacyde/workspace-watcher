@@ -352,13 +352,14 @@ dan ook staan.*
 *De entry-bundel is 149 kB raw / 40,5 kB gzipped, niet 82/25. En de hook was 21 ms, niet 5. Allebei
 rechtgezet; het argument tegen React blijft overeind, alleen het getal was verouderd.*
 
-**P11-12 De JVM houdt 1,2 GB vast voor 35 MB aan data** 🟢
+**P11-12 De JVM houdt 1,2 GB vast voor 35 MB aan data** ✅ (de vlag) / 🟢 (`lsof` met open tab)
 *Gemeten op 19 sep 2026 na vijf minuten draaien: RSS 1,42 GB, heap committed 1,17 GB, maar na een
 geforceerde full GC nog 35 MB live. Er staat geen `-Xmx`, dus G1 neemt een kwart van het geheugen
 (12 GB max op deze machine) als plafond en laat eden groeien tot 376 MB zonder ooit terug te geven.
 GC-kosten zijn 0,03% van de tijd, dus een kleinere heap kost niets meetbaars. Dat is getal (2) uit
 het performance-kader - geheugen van de geobserveerde machine - en het is een vlag, geen code:
-`-Xmx256m` op de startregel in `docs/build.md`. Bij dezelfde meting: `lsof` kost 0,13 s CPU per
+`-Xmx256m` op de startregel in `docs/build.md`. Gedaan en nagemeten: 373 MB RSS, en
+`history(20000)` even snel als zonder cap. Bij dezelfde meting: `lsof` kost 0,13 s CPU per
 oproep en met een open tab ~20 oproepen per minuut, dus 3-4% van een core - meer dan de hele JVM
 (2,3%). P11-02 heeft het idle-geval opgelost; met een open tab is het nog steeds de grootste post.*
 
