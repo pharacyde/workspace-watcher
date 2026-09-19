@@ -728,7 +728,78 @@ project bewust wél opgelost. `Status` heeft al `transcriptDirs` om te zeggen of
 `droppedEvents` ernaast is dezelfde soort waarheid. De feed hoort het zichtbaar te maken op het
 moment dat het gebeurt, niet pas als iemand het logbestand opent.*
 
+**P12-03 Wat de watcher zichzelf kost, op het dashboard** 🟡
+*Zie P15-01 hieronder: scan-ms, kindproces-ms en spool-latentie zijn goedkoop meetbaar en horen in
+`Status`; de hook-ms niet, want die klok kost onder bash 3.2 een fork.*
+
 ---
+
+## Epic 14-17 — Derde brainstorm (Gemini, 19 sep 2026)
+
+*Negen voorstellen uit een derde sessie, met dezelfde behandeling als de eerste twee: het originele
+ID blijft staan, en waar een voorstel iets vraagt dat er al is of op een aanname rust die niet klopt,
+staat dat erbij. Drie zijn er al (geheel of grotendeels), twee horen bij een bestaand item, vier
+zijn nieuw.*
+
+**P14-01 Cache-hits versus nieuwe tokens per beurt in de feed** 🟢
+*De data is er: `TokenUsage` telt per soort (input, output, cache creation, cache read) en P7-02
+laat zien dat cache reads hier 71% van de rekening zijn. Wat ontbreekt is de per-beurt-weergave:
+een beurt waarin `cache_creation` ineens groot is, is de beurt waarin de cache brak - meestal door
+een grote wijziging vooraan in de context. Dat is een meting, geen oordeel, dus het mag in de feed.
+Let wel op de valse lezing: de eerste beurt van een sessie bouwt de cache altijd op, dat is geen
+"breuk". Hoort bij P10-03 (duur per beurt), dat dezelfde beurt-groepering nodig heeft.*
+
+**P14-02 Meerdere agents naast elkaar in één workspace** 🟢 — onderdeel van P9-03
+*`WatchEvent.agent` bestaat al en wordt al getoond; wat het voorstel toevoegt (een kleur-chip per
+agent, een kolom in de database) is precies wat P9-03 nodig heeft zodra er een tweede adapter is.
+Geen apart item: zonder tweede adapter is er niets om te onderscheiden, en met een tweede adapter is
+dit de helft van het werk van P9-03 zelf.*
+
+**P15-01 De overhead van de watcher zelf op het dashboard** 🟡 → P12-03
+*Past precies in Epic 12 (wat de watcher over zichzelf zwijgt), naast P12-02. Twee van de drie
+getallen zijn goedkoop: `walkMs` wordt al per scan gemeten, en `Shell.run` kan de duur van elke
+`lsof`/`git` meegeven. Het derde, de hook-duur, niet: de hook draait onder bash 3.2 en heeft daar
+geen klok zonder een fork (`$EPOCHREALTIME` is bash 5), en een fork is precies wat P11-01 eruit
+heeft gehaald. Wat wél kan: de hook geeft zijn starttijd niet, maar de spool-latentie (bestand
+geschreven → gelezen) is aan de Java-kant meetbaar. Dus: scan-ms, kindproces-ms en spool-latentie
+in `Status`; de hook-ms blijft een meting die je met `--debug hooks` doet, en dat staat dan zo in
+de documentatie.*
+
+**P15-02 Eco-modus na vijf minuten stilte** 🟡
+*Grotendeels al gedaan, en het restant rust op een aanname die niet klopt. Gedaan: `lsof` gaat vijf
+keer trager zonder abonnee (P11-02), en de scanner houdt zichzelf aan een tiende van de wandkloktijd
+(P9-02, P11-03). De aanname: "geen FS-events, dus vertragen" - maar de scanner ís de bron van de
+FS-events, dus wie hem op 30 s zet, ziet het eerste event na de stilte 30 s te laat. Wat wel
+zinvol is: de hook en de transcript-tail zijn goedkoop en exact (laag 1) en kunnen de scanner
+wakker maken, zodat de FS-laag traag mag zijn zolang geen agent iets doet. Gemeten plafond van de
+winst: de JVM zelf zit op 2,3% met een open tab en 1,1% idle - het meeste zat in de kindprocessen,
+en dat is al aangepakt.*
+
+**P16-01 Waarschuwing bij een verouderde diff na `checkout`/`pull`/`reset`** ✅
+*Al gedaan als P10-21 en P10-22: de stille scan stempelt index en HEAD, en elk van die drie
+commando's verplaatst er minstens één; het paneel en de open diff verversen dan. Wat het voorstel
+toevoegt - een zichtbare melding "extern gewijzigd" in plaats van stil verversen - is de vraag van
+P12-01 in een andere gedaante: zeg wie het deed. Geen apart item.*
+
+**P16-02 Een commit-bericht genereren uit de feiten** 🟡 — onderdeel van P11-03
+*De feiten zijn het interessante deel en dat is P11-03 (welk deel van een commit kwam van de agent,
+welk deel met de hand). Een kopieerbare samenvatting daarvan is lezen en mag. Een "semantisch"
+bericht (`feat(agent): ...`) is dat niet: het type en de bedoeling van een wijziging staan nergens
+in de data, dus die zou het dashboard verzinnen - en dat is de fout waar dit project tegen gebouwd
+is. Als tekst-uit-de-feiten bij P11-03; niet als generator.*
+
+**P17-01 Navigeren zonder muis** 🟡 — zelfde voorwaarde als P10-18
+*Sluit aan bij de dichte IDE-opzet (P6-01). Vraagt hetzelfde als P10-18: een begrip van focus, dat er
+nu niet is - selectie is iets anders. Zodra dat er is, zijn `j`/`k` in de feed en een toets om van
+paneel te wisselen klein. Samen met P10-18 doen.*
+
+**P17-02 Regex-filter op de feed** 🟢 klein
+*Er is al een zoekveld, gedeeld over alle panelen, client-side, substring, met een cache op de
+zoeksleutel (`feed.ts`). Regex is daar een kleine uitbreiding op. Gemeten: filter plus samenvouwen
+over 20.000 rijen kost nu 0,45-0,61 ms per frame; een regex is trager, maar de cache zorgt dat het
+alleen bij een nieuwe sleutel of nieuwe events opnieuw loopt. Let op een ongeldige regex: die moet
+terugvallen op substring, niet op een lege feed.*
+
 
 ## Epic 9 — Added: what the original list did not cover
 
