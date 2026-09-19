@@ -2,6 +2,7 @@ import { css, html, LitElement } from 'lit';
 import { onConnectionState, request, type ConnectionState } from '../api/client';
 import {
   ActiveWorkspaceDocument,
+  SensitiveCountDocument,
   StatusDocument,
   WatchWorkspaceDocument,
   WorkspacesDocument,
@@ -13,6 +14,7 @@ import './feed';
 import './git-panel';
 import './process-panel';
 import './reload';
+import './sensitive';
 import './timeline';
 import './notify';
 import './usage';
@@ -28,6 +30,8 @@ export class App extends LitElement {
     connection: { state: true },
     search: { state: true },
     replay: { state: true },
+    sensitive: { state: true },
+    sensitiveOpen: { state: true },
   };
 
   declare private workspace: string;
@@ -39,8 +43,12 @@ export class App extends LitElement {
   declare private connection: ConnectionState;
   declare private search: string;
   declare private replay: { since: string; until: string } | null;
+  /** Secrets and personal data seen since start, as the server counts them. */
+  declare private sensitive: number;
+  declare private sensitiveOpen: boolean;
 
   private releaseConnection?: () => void;
+  private recount: ReturnType<typeof setTimeout> | null = null;
   private readonly workspaces = new LatestController(this, WorkspacesDocument);
   private readonly active = new LatestController(this, ActiveWorkspaceDocument);
 
@@ -78,6 +86,20 @@ export class App extends LitElement {
     .pill.warn {
       color: var(--warn);
       border-color: var(--warn);
+    }
+    /* A button, so it can be reached by keyboard, dressed as the pills beside it. */
+    button.pill {
+      background: none;
+      font: inherit;
+      cursor: pointer;
+    }
+    .pill.sensitive {
+      color: var(--del);
+      border-color: var(--del);
+    }
+    .pill.sensitive.open {
+      background: var(--del);
+      color: var(--panel);
     }
     .pill.live {
       color: var(--add);
@@ -123,6 +145,14 @@ export class App extends LitElement {
       gap: 1px;
       background: var(--line);
     }
+    /* A third row only while it is open: with nothing sensitive seen the grid is the familiar
+       four panels, and the pill is the only trace of the feature. */
+    main.with-sensitive {
+      grid-template-rows: 1fr 1fr minmax(120px, 28%);
+    }
+    ww-sensitive {
+      grid-column: 1 / -1;
+    }
   `;
 
   constructor() {
@@ -136,6 +166,8 @@ export class App extends LitElement {
     this.connection = 'connecting';
     this.search = '';
     this.replay = null;
+    this.sensitive = 0;
+    this.sensitiveOpen = false;
   }
 
   connectedCallback(): void {
@@ -163,6 +195,20 @@ export class App extends LitElement {
     this.addEventListener('replay-range', (event) => {
       this.replay = (event as CustomEvent<{ since: string; until: string } | null>).detail;
     });
+    // The live count reaches the header as a DOM event from ww-notify, which already holds an
+    // `events` subscription and already classifies GUARD events; the feed's log is paused, filtered
+    // and reset, and a third subscription here would send every event over the socket once more.
+    // The event is only the trigger: the number is re-asked from the server, because the stream
+    // replays its buffer on every reconnect and counting arrivals would count those twice.
+    this.addEventListener('sensitive-seen', () => {
+      this.recount ??= setTimeout(() => {
+        this.recount = null;
+        request(SensitiveCountDocument)
+          .then(({ status }) => (this.sensitive = status.sensitive))
+          .catch(() => undefined);
+      }, 250);
+    });
+    this.addEventListener('sensitive-hide', () => (this.sensitiveOpen = false));
     // Anything naming something in the old workspace has to go: a selected file, a replay window.
     let previous: string | null = null;
     this.addController({
@@ -189,6 +235,7 @@ export class App extends LitElement {
         titleWorkspace(status.workspace ?? null);
         this.hasTranscripts = status.transcriptDirs.length > 0;
         this.lost = status.loss.history + status.loss.stream;
+        this.sensitive = status.sensitive;
       })
       .catch(() => (this.workspace = 'backend unreachable'));
   }
@@ -196,6 +243,8 @@ export class App extends LitElement {
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.releaseConnection?.();
+    if (this.recount !== null) clearTimeout(this.recount);
+    this.recount = null;
   }
 
   /**
@@ -257,9 +306,18 @@ export class App extends LitElement {
               >${this.lost} dropped</span
             >`
           : ''}
+        ${this.sensitive > 0
+          ? html`<button
+              class="pill warn sensitive ${this.sensitiveOpen ? 'open' : ''}"
+              title="Secrets or personal data seen in what an agent sent or received since start. Click for which rule, which tool, which host."
+              @click=${() => (this.sensitiveOpen = !this.sensitiveOpen)}
+            >
+              ${this.sensitive} sensitive
+            </button>`
+          : ''}
       </header>
       <ww-timeline></ww-timeline>
-      <main>
+      <main class=${this.sensitiveOpen ? 'with-sensitive' : ''}>
         <ww-process-panel
           .search=${this.search}
           .selectedPid=${(this.selectedProcess as { pid: string } | null)?.pid ?? null}
@@ -271,6 +329,9 @@ export class App extends LitElement {
           .event=${this.selectedEvent}
           .process=${this.selectedProcess}
         ></ww-diff-panel>
+        ${this.sensitiveOpen
+          ? html`<ww-sensitive .count=${this.sensitive}></ww-sensitive>`
+          : ''}
       </main>
     `;
   }

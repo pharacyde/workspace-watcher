@@ -15,7 +15,9 @@ be.kleisli.ww
 ├── fs       WorkspaceScanService (mtime+size snapshot poller), FileTailService, FileChangeService
 ├── git      GitService (shells out to git; no JGit), PorcelainStatus (pure `status -z` parser)
 ├── proc     ProcessTreeService (lsof -a -d cwd + ProcessHandle)
-├── guard    GuardService (the one hook that may block, off by default)
+├── guard    GuardService (the one hook that may block, off by default), SensitiveContentScanner,
+│            SensitiveEventPublisher (bus subscriber: SENSITIVE_* events), RemoteTarget (pure
+│            classification of a tool call as outbound)
 ├── store    EventStore (queues and flushes to SQLite)
 ├── usage    Billing, Pricing, TokenUsage, AccountLimits, UsageService
 └── web      WatchDataFetcher (DGS queries, subscriptions, hook mutation), ApiMapper, HttpsConfig,

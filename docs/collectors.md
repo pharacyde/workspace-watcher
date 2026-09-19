@@ -176,6 +176,94 @@ was measured and lost. It is not a description of what the collectors do.
   workspace being watched, and only when neither exists against the watcher's own directory - and
   then only because the globs need an absolute path. `GuardServiceTest` covers the first two, and
   that resolving against the `cwd` still cannot make a disabled guard block (invariant 1b).
+- **`SensitiveEventPublisher` scans on the collector's thread and can only ever cost an event.** It
+  is a bus subscriber like `EventStore`, so it sees a `HOOK`, `TRANSCRIPT` or `GUARD` event the
+  moment it is published - inside the collector's own `publish` call. One scan per event, every
+  `RuntimeException` caught in `inspect` (the bus catches too, but that catch exists for a dead
+  browser; the test calls `inspect` directly so it cannot pass on the bus's account), and an event
+  it published itself is skipped by type prefix so an excerpt cannot start a loop (P18-01).
+- **It scans the summary and the string values of `detail`, not `detail` serialised.** The hook
+  payload is already a JSON string; `writeValueAsString` on the map holding it would escape every
+  quote once more, and a rule looking for `"password":` would be looking at `\"password\":`. The
+  summary repeats the payload's first line, so a token is found twice and `count` is the number of
+  distinct values, not of places found.
+- **A hook payload cut by `Text.truncate` still names its tool.** `detail.payload` is capped at
+  4,000 chars and a PostToolUse with a long response is exactly the `curl -d` worth classifying.
+  Claude Code writes `tool_input` before `tool_response`, so `leniently()` streams the top-level
+  fields and keeps what parsed before the cut; `readTree` on the same string yields nothing, and
+  the event became `SENSITIVE_CONTENT` for a call that was outbound. Tested with a 4 kB response.
+- **`RemoteTarget.of` is a reading of the command line, not of the network.** Bash is remote when
+  it carries an upload verb - `curl`/`wget` with a data, form, upload or POST/PUT flag, `scp`,
+  `rsync` or `ssh` with a host, `git push`, `gh api|gist|release`, `aws s3 cp|sync`, `npm publish`
+  - and the host is the first URL or `user@host:` in it; `WebFetch`, `WebSearch` and any
+  `mcp__` tool are remote by nature. Loopback, `localhost`, `*.local` are not remote whatever the
+  verb. Known false negatives, on purpose and stated in the README: `curl -T file` names a file
+  and shows no content; `$TOKEN` in a header is invisible until the shell expands it; a script that
+  POSTs on its own is a `Bash  $ ./deploy.sh`; and bundled short flags (`curl -sSd`) are not read.
+  A verb is matched as a word, `(?<![\w-])curl(?![\w-])`: an earlier lookbehind also refused `/`
+  and `.`, which made `/usr/bin/curl -d` a local call; `RemoteTargetTest` pins that spelling and
+  `rsyncd.log` both.
+- **`sensitiveEvents` reads by `(workspace, source, id)`.** `(workspace, id)` alone walks every row
+  of the workspace to find the few that are GUARD: 34ms against 0.1ms over 200k rows, measured with
+  `EXPLAIN QUERY PLAN`. The obvious `(workspace, source, type, id)` is not picked by the planner at
+  all - `type IN (...)` on an index column forces a sort and it falls back to `(workspace, id)`.
+  `EventStoreTest.sensitiveEventsUseTheirIndex` asks SQLite for the plan of the very statement.
+
+### Secrets and personal data (`SensitiveContentScanner`, P18-02)
+
+- **Sixteen rules, two classes.** Secrets are replaced, personal data is only reported. Secrets:
+  `aws-access-key` (`AKIA` + 16), `gcp-api-key` (`AIza` + 35), `github-token` (`gh[pousr]_` + 36,
+  `github_pat_`), `slack-token` (`xox[baprs]-`), `anthropic-key` (`sk-ant-`), `openai-key` (`sk-`
+  + 32, not `sk-ant-`), `private-key` (PEM header, body and footer), `jwt` (`eyJ` and three
+  base64url segments whose first decodes to a header with `"alg"`), `authorization-header`
+  (`Bearer|Basic|Token` + 8), `url-userinfo` (`scheme://user:password@host`, password only),
+  `password-assignment` (`password|passwd|pwd|secret|api_key|token` followed by `=` or `:`, value
+  only). Personal data: `email`, `iban` (mod 97), `rrn-be` (Belgian national number, both the
+  pre-2000 and the 2000+ checksum, `YY.MM.DD-XXX.XX` punctuation allowed), `phone-be` (`+32`/`04`
+  mobile), `credit-card` (13-19 digits, Luhn). The split is not taste: the secret rules have a
+  fixed prefix and produced 0 false positives on 138k stored rows, while a KBO number looks like a
+  mobile number and a Lambert coordinate passes the national-number checksum 1 in 97 times. A
+  false positive that is flagged can be ignored; one that is redacted is gone.
+- **Every quantifier is bounded and possessive.** The spike measured one rule, `[a-z][a-z0-9+.-]*://`,
+  at 65 ms on a 5 kB base64 blob - at every position it ran to the end of the token before
+  failing - and 0.8 ms with `{0,15}+`. `SensitiveContentScannerTest.boundedOnOneLongToken` times a
+  5 kB single token and fails above 5 ms; measured 0.65 ms for all sixteen rules. Possessive bites
+  back once: `-----BEGIN [A-Z ]{0,20}+PRIVATE KEY` never matches, because the class eats
+  `PRIVATE KEY` itself and cannot give it back; the PEM label is `(?:(?!PRIVATE)[A-Z]{1,12}+ ){0,2}+`.
+- **The literal comes first, the boundary looks back over it.** `(?<![A-Za-z0-9_])AKIA…` costs
+  0.04 ms per 4 kB for every such rule, `AKIA(?<![A-Za-z0-9_]AKIA)…` 0.003 ms: the engine only
+  skips ahead to a literal when the pattern starts with one. Same reason `github-token` is two
+  rules with one name rather than one alternation. Measured on a 4 kB hook payload: 1.04 ms before,
+  0.63 ms after, of which the six token rules are now 0.02 ms together and `email`, `url-userinfo`
+  and `phone-be` most of the rest.
+- **Overlaps: a secret beats personal data, then the longer span, then the earlier rule.** The
+  first clause is load-bearing: `postgres://app:pw@db.internal` is also the e-mail address
+  `pw@db.internal`, which is the longer match, and losing that tie would leave the password in
+  place. Overlap is judged on the whole match, the hit is the replaced group.
+- **The marker is idempotent by construction.** A hit becomes `‹rule:xxxx…›`, and no rule's value
+  class admits `‹`, `›` or `…`, so a second pass over redacted text finds nothing - which is what
+  lets `redactHistory` run any number of times. The four kept characters are why a search for a
+  leaked token must use the token, not its prefix: `‹github-token:ghp_…›` still contains `ghp_`.
+- **Record-time hook points, before `Text.truncate` and before `bus.publish`.** `HookEvents.publish`
+  (payload and summary; the parse error of a malformed payload too, since it can quote the input),
+  `TranscriptTailService.emitToolUse` (label - which is remembered for the result's summary - and
+  input) and `emitToolResult` (output and the fallback first line). Redacting *after* truncation
+  would leave a token cut in half in the last bytes; redacting the whole text would cost 0.19 ms
+  per kB on a `tool_response` that can be megabytes. `redactHead` takes the first `limit + 8192`
+  characters: longer than any single bounded secret, so a token straddling the cut is replaced
+  before the cut is made (`redactHeadCoversTheOverhang`). The event carries the distinct rule
+  names under `detail.sensitive`, so a subscriber need not scan again.
+- **`EventStore.redactHistory` holds the writer's monitor only to write.** Batches of 5000 ids are
+  read over a reader connection and scanned on the caller's thread; only the rows that changed go
+  through one `UPDATE` batch under the same `synchronized` as `flush`, released before the next
+  read. Measured on 50k rows with half carrying a token: 0.7-0.8 s in total, the slowest flush that
+  arrived meanwhile 3-10 ms. The first version of that test flushed in a tight loop and took 71 s,
+  which measured the unfairness of a Java monitor rather than the store; it now flushes every 20
+  ms, still 25 times the production cadence.
+- **What this does not do.** Claude Code's own transcript in `~/.claude/projects` keeps the secret
+  regardless; this removes it from the second copy, the one served without auth (invariant 4).
+  Names are not a rule: that is NER, not a regex. And a token past the 12 kB scan window is not
+  stored, but it is not reported either.
 
 ## Storage and the timeline
 

@@ -824,7 +824,7 @@ laag 1 exact zichtbaar (`Bash.command`, `WebFetch.url`, `WebSearch.query`, MCP-i
 terugkwam ook; wat een gestart proces of een stdio-MCP-server zelf verstuurt niet, en dat blijft
 P9-04. Volgorde: eerst P18-02 (het lek in de eigen opslag), dan P18-01, dan pas P18-03.*
 
-**P18-01 Secrets en PII in de opgenomen events, achteraf** 🟢 — een dag
+**P18-01 Secrets en PII in de opgenomen events, achteraf** ✅
 *Een `SensitiveContentScanner` in `guard` die als bus-abonnee naast `EventStore` elk HOOK- en
 TRANSCRIPT-event scant (ook `TOOL_RESULT`, want dat is wat naar het model ging) en per treffer een
 GUARD-event `SENSITIVE_OUTBOUND` (remote-doel in de call) of `SENSITIVE_CONTENT` publiceert met
@@ -837,7 +837,22 @@ met `[…]*://`, 0,8 ms met `{0,15}+`), en de entropie-regel eruit - 56% van de 
 paden en ids. Scan vóór `Text.truncate`, anders is de dekking van een 20 kB result 20%. Feed en
 timeline tonen ze als GUARD; `Status` krijgt de teller. Geen namen: dat is NER, geen regex.*
 
-**P18-02 Redacteren bij opname, en de geschiedenis nalopen** 🟢 — een dag, eerst
+*Gedaan, de publicatiekant: `SensitiveEventPublisher` in `guard` is een bus-abonnee naast
+`EventStore` en publiceert per regel die raakt één GUARD-event, `SENSITIVE_OUTBOUND` als de call
+een remote doel noemt en anders `SENSITIVE_CONTENT`, met regel, bron-`seq`, tool, host, vier tekens
+vóór de match en het aantal verschillende waarden - nooit de match, en dat staat in een test. Het
+remote-oordeel is een pure functie `RemoteTarget.of(tool, input)` met 39 gevallen in de test, en
+loopback, `localhost` en `*.local` tellen niet. Twee dingen die onderweg bleken: een hook-payload
+die door de detail-cap is afgekapt parseert niet meer als geheel, en juist een PostToolUse met een
+lang antwoord is de `curl -d` die je wilt classificeren - dus de velden worden gestreamd tot de
+knip; en `(workspace, source, type, id)` als index kiest SQLite niet eens, `(workspace, source, id)`
+wel (0,1 ms tegen 34 ms over 200k rijen). `sensitiveEvents(limit)` leest uit het archief,
+`Status.sensitive` telt. De scanner zelf (de zestien regels) is een aparte stap; hier draait hij
+tegen een stub met markeertekst. Nog niet: scannen vóór `Text.truncate` - de abonnee ziet het event
+na de cap, dus een result van 20 kB is voor 20% gedekt zolang de cap in `HookEvents` en de tail
+zit.*
+
+**P18-02 Redacteren bij opname, en de geschiedenis nalopen** ✅
 *Secrets-regels (vaste prefix: 0 valse treffers op 138k rijen) vervangen de match in `detail` door
 `‹regel:xxxx…›` vóór `bus.publish`, in `HookEvents` en `TranscriptTailService`; PII-regels flaggen
 alleen, want KBO-nummers lijken op gsm-nummers en Lambert-coördinaten halen 1 op 97 keer het
@@ -845,6 +860,21 @@ RRN-controlegetal. Eén mutatie `redactHistory` loopt bestaande rijen na op de f
 batches zoals de prune (0,4 ms per rij; de 392 MB hier ≈ 1 minuut). Eerlijk erbij in de README:
 Claude Code's eigen transcript in `~/.claude/projects` houdt het secret toch; dit haalt het uit de
 tweede kopie die zonder auth wordt geserveerd (invariant 4).*
+
+*Gedaan. `SensitiveContentScanner` heeft de zestien regels, elk begrensd en possessive: 0,63 ms voor
+een hook-payload van 4 kB en 0,65 ms voor een blob van 5 kB uit één token, met een test die boven
+5 ms faalt. Twee dingen die het meten opleverde: een regel die met een lookbehind begint kost 0,04
+ms per 4 kB, dezelfde regel met de literal vooraan 0,003 ms (de engine springt alleen naar een
+literal waarmee het patroon begint), en `[A-Z ]{0,20}+PRIVATE KEY` matcht nooit omdat possessive
+`PRIVATE KEY` zelf opeet. Bij overlap wint een secret van PII, want `user:pw@host` is ook een
+e-mailadres en dat is de langere. Geredacteerd wordt de kop van de tekst tot 8 kB voorbij
+`DETAIL_LIMIT`, niet de hele `tool_response` van megabytes: wat erna komt wordt toch afgeknipt, en
+een token op de knip valt binnen de marge. Het event draagt de regelnamen in `detail.sensitive`.
+`redactHistory` leest per 5000 rijen via een leesverbinding en houdt de monitor alleen voor de
+UPDATE van wat veranderde: 50k rijen in 0,7 s, en een flush die intussen aankwam wachtte hoogstens
+10 ms - de eerste versie van die test flushte in een strakke lus en deed er 71 s over, wat de
+onbillijkheid van een Java-monitor mat en niet de store. De marker houdt vier tekens, dus wie op
+een gelekt token zoekt moet het token zoeken en niet zijn prefix.*
 
 **P18-03 CONTENT-regel in de guard, vooraf** 🟡 — een week
 *Derde `GuardRuleKind`: scant `tool_input` alleen wanneer de call remote is - Bash met upload-verbum

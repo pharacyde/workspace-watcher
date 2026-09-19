@@ -22,6 +22,8 @@ import be.kleisli.ww.generated.types.UsageSummary;
 import be.kleisli.ww.generated.types.WorkspaceEntry;
 import be.kleisli.ww.git.GitService;
 import be.kleisli.ww.guard.GuardService;
+import be.kleisli.ww.guard.SensitiveContentScanner;
+import be.kleisli.ww.guard.SensitiveEventPublisher;
 import be.kleisli.ww.proc.ProcessTreeService;
 import be.kleisli.ww.store.EventStore;
 import be.kleisli.ww.usage.AccountLimits;
@@ -61,6 +63,8 @@ public class WatchDataFetcher {
   private final SessionRegistry sessions;
   private final EventStore store;
   private final GuardService guard;
+  private final SensitiveEventPublisher sensitive;
+  private final SensitiveContentScanner scanner;
   private final UsageService usage;
   private final AccountLimits limits;
   private final EventBus eventBus;
@@ -79,6 +83,8 @@ public class WatchDataFetcher {
       SessionRegistry sessions,
       EventStore store,
       GuardService guard,
+      SensitiveEventPublisher sensitive,
+      SensitiveContentScanner scanner,
       UsageService usage,
       AccountLimits limits,
       EventBus eventBus,
@@ -95,6 +101,8 @@ public class WatchDataFetcher {
     this.sessions = sessions;
     this.store = store;
     this.guard = guard;
+    this.sensitive = sensitive;
+    this.scanner = scanner;
     this.usage = usage;
     this.limits = limits;
     this.eventBus = eventBus;
@@ -137,7 +145,7 @@ public class WatchDataFetcher {
             Loss.newBuilder().history((double) store.dropped()).stream(
                     (double) eventBus.droppedForSlowSubscribers())
                 .build())
-        .sensitive(0.0)
+        .sensitive((double) sensitive.hits())
         .git(mapper.toGitSnapshot(git.current()))
         .processes(mapper.toProcessSnapshot(processes.currentSnapshot()))
         .build();
@@ -313,20 +321,21 @@ public class WatchDataFetcher {
     return true;
   }
 
-  /** Removes a workspace registration. The project itself is never touched. */
-  // Contract for Epic 18; filled in by P18-01.
+  /** Secrets and personal data seen in what agents sent and received, newest first (P18-01). */
   @DgsQuery
   public List<be.kleisli.ww.generated.types.WatchEvent> sensitiveEvents(
       @InputArgument Integer limit) {
-    return List.of();
+    return store.sensitiveEvents(limit == null ? DEFAULT_EVENT_LIMIT : limit).stream()
+        .map(mapper::toEvent)
+        .toList();
   }
 
-  // Contract for Epic 18; filled in by P18-02.
   @DgsMutation
   public double redactHistory() {
-    return 0;
+    return store.redactHistory(scanner);
   }
 
+  /** Removes a workspace registration. The project itself is never touched. */
   @DgsMutation
   public boolean forgetWorkspace(@InputArgument String path) {
     return registry.forget(path);
@@ -385,7 +394,7 @@ public class WatchDataFetcher {
     try {
       String decoded =
           new String(Base64.getDecoder().decode(payloadBase64), StandardCharsets.UTF_8);
-      HookEvents.publish(eventBus, objectMapper, decoded, "graphql");
+      HookEvents.publish(eventBus, objectMapper, scanner, decoded, "graphql");
     } catch (RuntimeException e) {
       eventBus.publish(
           WatchEvent.of(WatchEvent.Source.HOOK, "HOOK")

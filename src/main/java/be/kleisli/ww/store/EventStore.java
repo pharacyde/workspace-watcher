@@ -4,6 +4,7 @@ import be.kleisli.ww.core.ActiveWorkspace;
 import be.kleisli.ww.core.EventBus;
 import be.kleisli.ww.core.WatchEvent;
 import be.kleisli.ww.core.WatcherProperties;
+import be.kleisli.ww.guard.SensitiveContentScanner;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
@@ -338,20 +339,7 @@ public class EventStore {
       statement.setInt(6, Math.clamp(limit, 1, 20_000));
       try (ResultSet rs = statement.executeQuery()) {
         while (rs.next()) {
-          rows.add(
-              new Stored(
-                  rs.getString(1),
-                  rs.getString(2),
-                  rs.getString(3),
-                  rs.getString(4),
-                  rs.getString(5),
-                  rs.getString(6),
-                  rs.getString(7),
-                  rs.getString(8),
-                  rs.getString(9),
-                  rs.getString(10),
-                  rs.getString(11),
-                  rs.getString(12)));
+          rows.add(read(rs));
         }
       }
     } catch (SQLException e) {
@@ -359,6 +347,67 @@ public class EventStore {
       return List.of();
     }
     return rows.reversed();
+  }
+
+  /**
+   * The sensitive-content events of the active workspace, newest first (P18-01).
+   *
+   * <p>Served by the (workspace, source, id) index: GUARD is a sliver of a workspace's rows, and
+   * walking that sliver in id order costs no sort. On (workspace, id) alone SQLite walks every row
+   * of the workspace to find the few that are GUARD; the numbers are on the index in schema.sql.
+   */
+  public List<Stored> sensitiveEvents(int limit) {
+    if (databaseFile == null) {
+      return List.of();
+    }
+    Path workspace = active.get();
+    if (workspace == null) {
+      return List.of();
+    }
+    List<Stored> rows = new ArrayList<>();
+    try (Connection reader = openForReading();
+        PreparedStatement statement = reader.prepareStatement(SENSITIVE_SQL)) {
+      statement.setString(1, workspace.toString());
+      statement.setInt(2, Math.clamp(limit, 1, 2_000));
+      try (ResultSet rs = statement.executeQuery()) {
+        while (rs.next()) {
+          rows.add(read(rs));
+        }
+      }
+    } catch (SQLException e) {
+      log.warn("cannot read sensitive events: {}", e.toString());
+      return List.of();
+    }
+    return rows;
+  }
+
+  /** Package-private so the test can ask SQLite for the plan of the very statement that runs. */
+  static final String SENSITIVE_SQL =
+      """
+      SELECT seq, ts, source, type, summary, path, agent, session_id, mcp_server,
+             subagent, detail, workspace
+      FROM event
+      WHERE workspace = ?
+        AND source = 'GUARD'
+        AND type IN ('SENSITIVE_OUTBOUND', 'SENSITIVE_CONTENT')
+      ORDER BY id DESC
+      LIMIT ?\
+      """;
+
+  private static Stored read(ResultSet rs) throws SQLException {
+    return new Stored(
+        rs.getString(1),
+        rs.getString(2),
+        rs.getString(3),
+        rs.getString(4),
+        rs.getString(5),
+        rs.getString(6),
+        rs.getString(7),
+        rs.getString(8),
+        rs.getString(9),
+        rs.getString(10),
+        rs.getString(11),
+        rs.getString(12));
   }
 
   /** One resource sample: CPU percent across the workspace's processes, and their total RSS. */
@@ -575,6 +624,96 @@ public class EventStore {
       }
     } catch (SQLException e) {
       log.warn("cannot prune history: {}", e.toString());
+    }
+  }
+
+  /** One row's redactable columns. */
+  private record Redactable(long id, String summary, String detail) {}
+
+  private static final int REDACT_BATCH = 5000;
+
+  /**
+   * Runs the scanner over every stored row, the way new rows are redacted at record time, and
+   * returns how many changed.
+   *
+   * <p>Rows are read and scanned on the caller's thread over a reader connection; the writer's
+   * monitor is taken only to apply one batch of changed rows and is released before the next batch
+   * is read. A flush arriving mid-way therefore waits for one small transaction, not for the scan.
+   * Measured in docs/collectors.md, "Guard".
+   */
+  public int redactHistory(SensitiveContentScanner scanner) {
+    if (databaseFile == null) {
+      return 0;
+    }
+    int changed = 0;
+    long after = 0;
+    while (true) {
+      List<Redactable> batch;
+      try {
+        batch = readRedactables(after);
+      } catch (SQLException e) {
+        log.warn("cannot read history for redaction: {}", e.toString());
+        return changed;
+      }
+      if (batch.isEmpty()) {
+        return changed;
+      }
+      List<Redactable> rewritten = new ArrayList<>();
+      for (Redactable row : batch) {
+        Redactable clean =
+            new Redactable(
+                row.id(),
+                scanner.redact(row.summary()).text(),
+                scanner.redact(row.detail()).text());
+        if (!clean.equals(row)) {
+          rewritten.add(clean);
+        }
+      }
+      changed += writeRedacted(rewritten);
+      after = batch.getLast().id();
+    }
+  }
+
+  private List<Redactable> readRedactables(long after) throws SQLException {
+    List<Redactable> rows = new ArrayList<>();
+    try (Connection reader = openForReading();
+        PreparedStatement statement =
+            reader.prepareStatement(
+                "SELECT id, summary, detail FROM event WHERE id > ? ORDER BY id LIMIT ?")) {
+      statement.setLong(1, after);
+      statement.setInt(2, REDACT_BATCH);
+      try (ResultSet rs = statement.executeQuery()) {
+        while (rs.next()) {
+          rows.add(new Redactable(rs.getLong(1), rs.getString(2), rs.getString(3)));
+        }
+      }
+    }
+    return rows;
+  }
+
+  private synchronized int writeRedacted(List<Redactable> rows) {
+    if (connection == null || rows.isEmpty()) {
+      return 0;
+    }
+    try (PreparedStatement statement =
+        connection.prepareStatement("UPDATE event SET summary = ?, detail = ? WHERE id = ?")) {
+      for (Redactable row : rows) {
+        statement.setString(1, row.summary());
+        statement.setString(2, row.detail());
+        statement.setLong(3, row.id());
+        statement.addBatch();
+      }
+      int[] counts = statement.executeBatch();
+      connection.commit();
+      return java.util.Arrays.stream(counts).sum();
+    } catch (SQLException e) {
+      log.warn("cannot redact history: {}", e.toString());
+      try {
+        connection.rollback();
+      } catch (SQLException ignored) {
+        // The rows stay as they were; a later run picks them up again.
+      }
+      return 0;
     }
   }
 

@@ -154,5 +154,11 @@ bundle is 155 kB (42 kB gzipped) with Monaco code-split.
   characters before it truncates, so spelling out the name of the app - the same in every one of
   these tabs - would spend them all on the half that cannot tell them apart. No logo in the string
   either: the tab already draws the eye as its icon immediately to the left of it.
+- **A header count fed by the `events` stream is re-asked, never accumulated.** The stream replays
+  the server's buffer on every reconnect, so adding one per arriving `SENSITIVE_*` event to the
+  number `status` gave at load counted every replayed hit a second time. `ww-notify`, which already
+  holds that subscription, only announces that one went by (`sensitive-seen`); the header answers
+  by asking `status.sensitive` again, debounced. No third subscription: each one sends every event
+  over the socket once more, and the feed's log is paused, filtered and reset, so it cannot count.
 - **`frontend/.npmrc` pins the public registry** so a corporate mirror, which typically lags npmjs
   by a patch, cannot make the lockfile unresolvable on someone else's machine.

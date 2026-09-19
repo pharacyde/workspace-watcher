@@ -165,7 +165,10 @@ export class Notify extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.release = subscribe(EventsDocument, (data) => this.consider(data.events));
+    this.release = subscribe(EventsDocument, (data) => {
+      this.announceSensitive(data.events);
+      this.consider(data.events);
+    });
     document.addEventListener('visibilitychange', this.onVisibility);
     // Sound survives a reload as a preference, but an audio context cannot: it may only be opened
     // during a gesture. Without this the setting would say "sound" and stay silent after every
@@ -216,10 +219,25 @@ export class Notify extends LitElement {
     paintIcon(false);
   };
 
+  /**
+   * Tells the page a secret or personal data went by, whatever the mode and whether or not the tab
+   * is hidden. This element already holds the one `events` subscription that classifies GUARD
+   * events, so the header pill listens here rather than opening a third copy of the stream.
+   */
+  private announceSensitive(event: FeedEvent) {
+    if (event.source !== 'GUARD' || !event.type.startsWith('SENSITIVE_')) return;
+    this.dispatchEvent(
+      new CustomEvent('sensitive-seen', { detail: event, bubbles: true, composed: true }),
+    );
+  }
+
   /** What is worth interrupting someone for. Everything else stays in the feed. */
   private notable(event: FeedEvent): string | null {
     if (event.type === 'TOOL_ERROR') return 'Tool failed';
-    if (event.source === 'GUARD') return event.type === 'DENIED' ? 'Blocked' : 'Flagged';
+    if (event.source === 'GUARD') {
+      if (event.type.startsWith('SENSITIVE_')) return 'Sensitive data';
+      return event.type === 'DENIED' ? 'Blocked' : 'Flagged';
+    }
     if (event.source === 'HOOK' && event.type === 'Stop') return 'Agent finished';
     return null;
   }

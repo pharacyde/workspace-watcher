@@ -16,7 +16,42 @@ export const StatusDocument = graphql(`
         history
         stream
       }
+      sensitive
     }
+  }
+`);
+
+// Only the counter, for re-asking after a sensitive event arrived: the full Status query drags the
+// git and process snapshots along, which is more than a number in a pill is worth.
+export const SensitiveCountDocument = graphql(`
+  query SensitiveCount {
+    status {
+      sensitive
+    }
+  }
+`);
+
+export const SensitiveEventsDocument = graphql(`
+  query SensitiveEvents($limit: Int) {
+    sensitiveEvents(limit: $limit) {
+      seq
+      ts
+      source
+      type
+      summary
+      path
+      agent
+      sessionId
+      mcpServer
+      subagent
+      detail
+    }
+  }
+`);
+
+export const RedactHistoryDocument = graphql(`
+  mutation RedactHistory {
+    redactHistory
   }
 `);
 

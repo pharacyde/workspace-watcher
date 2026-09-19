@@ -47,6 +47,19 @@ class EventStoreTest {
     return new Wiring(bus, store);
   }
 
+  private int rowsContaining(String text) throws java.sql.SQLException {
+    try (java.sql.Connection c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + database);
+        java.sql.PreparedStatement s =
+            c.prepareStatement(
+                "SELECT COUNT(*) FROM event WHERE instr(summary, ?) > 0 OR instr(detail, ?) > 0")) {
+      s.setString(1, text);
+      s.setString(2, text);
+      try (java.sql.ResultSet rs = s.executeQuery()) {
+        return rs.getInt(1);
+      }
+    }
+  }
+
   private static void publish(EventBus bus, String summary) {
     bus.publish(WatchEvent.of(WatchEvent.Source.FS, "CREATED").summary(summary));
   }
@@ -88,6 +101,66 @@ class EventStoreTest {
     }
     w.store().flush();
     assertThat(notices).hasSize(2);
+  }
+
+  @Test
+  @DisplayName("redactHistory rewrites only rows with a secret, once, without holding up the flush")
+  void redactsHistoryInBatchesBetweenFlushes() throws Exception {
+    Wiring w = open();
+    String token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
+    // 50k rows, every second one carrying the token in both columns; the queue holds 20k.
+    for (int i = 0; i < 50_000; i++) {
+      String text = i % 2 == 0 ? "export GH=" + token : "export GH=nothing";
+      w.bus()
+          .publish(
+              WatchEvent.of(WatchEvent.Source.HOOK, "PostToolUse")
+                  .summary("Bash  $ " + text)
+                  .detail("payload", "{\"command\":\"" + text + "\"}"));
+      if (i % 10_000 == 9_999) {
+        w.store().flush();
+      }
+    }
+    assertThat(w.store().dropped()).isZero();
+
+    // A flush arriving mid-way must wait for one small transaction, not for the whole pass.
+    java.util.concurrent.atomic.AtomicLong slowestFlushNanos =
+        new java.util.concurrent.atomic.AtomicLong();
+    java.util.concurrent.atomic.AtomicBoolean redacting =
+        new java.util.concurrent.atomic.AtomicBoolean(true);
+    Thread flusher =
+        new Thread(
+            () -> {
+              // Every 20 ms, 25 times the production cadence; a tight loop would measure the
+              // unfairness of a Java monitor rather than the store.
+              while (redacting.get()) {
+                try {
+                  Thread.sleep(20);
+                } catch (InterruptedException e) {
+                  return;
+                }
+                publish(w.bus(), "during");
+                long start = System.nanoTime();
+                w.store().flush();
+                slowestFlushNanos.accumulateAndGet(System.nanoTime() - start, Math::max);
+              }
+            });
+    flusher.start();
+    long start = System.nanoTime();
+    int changed = w.store().redactHistory(new be.kleisli.ww.guard.SensitiveContentScanner());
+    long millis = (System.nanoTime() - start) / 1_000_000;
+    redacting.set(false);
+    flusher.join();
+    System.out.printf(
+        "redactHistory: 50k rows in %d ms; slowest concurrent flush %.1f ms%n",
+        millis, slowestFlushNanos.get() / 1e6);
+
+    assertThat(changed).isEqualTo(25_000);
+    assertThat(slowestFlushNanos.get() / 1_000_000).isLessThan(100);
+    // The marker keeps four characters, so the search is for the token itself, not its prefix.
+    assertThat(rowsContaining(token)).isZero();
+    assertThat(rowsContaining("‹github-token:ghp_…›")).isEqualTo(25_000);
+    // Idempotent: the markers are not secrets, so a second pass finds nothing to change.
+    assertThat(w.store().redactHistory(new be.kleisli.ww.guard.SensitiveContentScanner())).isZero();
   }
 
   @Test
@@ -173,6 +246,63 @@ class EventStoreTest {
 
     assertThat(w.store().history(null, null, null, 10).getFirst().detail())
         .isEqualTo("{\"tool\":\"Bash\"}");
+  }
+
+  @Test
+  @DisplayName(
+      "sensitiveEvents lists only the sensitive GUARD rows of this workspace, newest first")
+  void listsSensitiveEvents() throws IOException {
+    Path other = Files.createDirectory(tmp.resolve("other"));
+    Wiring w = open();
+    w.bus().publish(WatchEvent.of(WatchEvent.Source.GUARD, "SENSITIVE_CONTENT").summary("first"));
+    w.bus().publish(WatchEvent.of(WatchEvent.Source.GUARD, "FLAGGED").summary("a guard rule"));
+    w.bus().publish(WatchEvent.of(WatchEvent.Source.HOOK, "PreToolUse").summary("the call"));
+    w.bus().publish(WatchEvent.of(WatchEvent.Source.GUARD, "SENSITIVE_OUTBOUND").summary("second"));
+    w.store().flush();
+    // Another workspace's hit must not show up here.
+    Wiring elsewhere = open(new ActiveWorkspace(propsFor(other)));
+    elsewhere
+        .bus()
+        .publish(WatchEvent.of(WatchEvent.Source.GUARD, "SENSITIVE_CONTENT").summary("x"));
+    elsewhere.store().flush();
+
+    assertThat(w.store().sensitiveEvents(200))
+        .extracting(EventStore.Stored::summary)
+        .containsExactly("second", "first");
+    assertThat(w.store().sensitiveEvents(1))
+        .extracting(EventStore.Stored::summary)
+        .containsExactly("second");
+    // A nonsense limit is clamped rather than refused.
+    assertThat(w.store().sensitiveEvents(0)).hasSize(1);
+  }
+
+  private WatcherProperties propsFor(Path workspace) {
+    WatcherProperties p = new WatcherProperties();
+    p.setDatabase(database.toString());
+    p.setWorkspace(workspace.toString());
+    return p;
+  }
+
+  @Test
+  @DisplayName("sensitiveEvents is served by the (workspace, source, id) index, without a sort")
+  void sensitiveEventsUseTheirIndex() throws Exception {
+    // The plan of the very statement that runs: on (workspace, id) alone SQLite walks every row
+    // of the workspace to find the few GUARD ones - 34ms against 0.1ms over 200k rows.
+    open();
+    List<String> plan = new java.util.ArrayList<>();
+    try (java.sql.Connection c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + database);
+        java.sql.PreparedStatement st =
+            c.prepareStatement("EXPLAIN QUERY PLAN " + EventStore.SENSITIVE_SQL)) {
+      st.setString(1, workspace.toString());
+      st.setInt(2, 200);
+      try (java.sql.ResultSet rs = st.executeQuery()) {
+        while (rs.next()) {
+          plan.add(rs.getString("detail"));
+        }
+      }
+    }
+    assertThat(plan).singleElement().asString().contains("event_workspace_source_id");
+    assertThat(plan.getFirst()).doesNotContain("TEMP B-TREE");
   }
 
   @Test

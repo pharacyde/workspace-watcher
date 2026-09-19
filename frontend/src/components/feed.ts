@@ -69,6 +69,7 @@ function label(source: Source, type: string): string {
     case 'HOOK':
       return 'hook';
     case 'GUARD':
+      if (type.startsWith('SENSITIVE_')) return 'sensitive';
       return type === 'DENIED' ? 'blocked' : 'flagged';
     case 'FS':
       return type.toLowerCase();

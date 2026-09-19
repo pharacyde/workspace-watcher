@@ -32,6 +32,13 @@ CREATE INDEX IF NOT EXISTS event_workspace_ts ON event (workspace, ts);
 -- workspace and then sorted the whole partition: measured at 328ms over 500k rows against 1ms.
 CREATE INDEX IF NOT EXISTS event_workspace_id ON event (workspace, id);
 
+-- sensitiveEvents asks for the newest GUARD rows of a workspace. On (workspace, id) that is a
+-- walk over every row of the workspace to find the few that are GUARD: measured over 200k rows,
+-- 34ms against 0.1ms on this one, which reads the GUARD sliver in id order with no sort. Not
+-- (workspace, source, type, id): the planner does not pick it, because `type IN (...)` on an
+-- index column forces a sort and it falls back to (workspace, id). EventStoreTest pins the plan.
+CREATE INDEX IF NOT EXISTS event_workspace_source_id ON event (workspace, source, id);
+
 -- Resource samples live beside the events: same file, same retention, same lifecycle.
 CREATE TABLE IF NOT EXISTS metric (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,

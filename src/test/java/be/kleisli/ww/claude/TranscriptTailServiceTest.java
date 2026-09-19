@@ -6,6 +6,7 @@ import be.kleisli.ww.core.ActiveWorkspace;
 import be.kleisli.ww.core.EventBus;
 import be.kleisli.ww.core.WatchEvent;
 import be.kleisli.ww.core.WatcherProperties;
+import be.kleisli.ww.guard.SensitiveContentScanner;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -54,7 +55,8 @@ class TranscriptTailServiceTest {
             locator,
             new SessionRegistry(locator, props, new ObjectMapper()),
             bus,
-            new ObjectMapper());
+            new ObjectMapper(),
+            new SensitiveContentScanner());
   }
 
   private void append(String line) throws IOException {
@@ -384,5 +386,56 @@ class TranscriptTailServiceTest {
     assertThat(poll())
         .singleElement()
         .satisfies(e -> assertThat(e.summary()).contains("echo live"));
+  }
+
+  @Test
+  @DisplayName("a header in a tool call is replaced in the summary and the input before publishing")
+  void redactsToolUse() throws IOException {
+    poll();
+    append(
+        toolUse(
+            "Bash",
+            "{\"command\":\"curl -H 'Authorization: Bearer AbCdEfGhIjKlMnOpQrStUv' https://x/\"}"));
+
+    assertThat(poll())
+        .singleElement()
+        .satisfies(
+            e -> {
+              @SuppressWarnings("unchecked")
+              var detail = (java.util.Map<String, Object>) e.detail();
+              assertThat(e.summary())
+                  .doesNotContain("AbCdEfGhIjKlMnOpQrStUv")
+                  .contains("Bearer ‹authorization-header:AbCd…›");
+              assertThat((String) detail.get("input"))
+                  .doesNotContain("AbCdEfGhIjKlMnOpQrStUv")
+                  .contains("‹authorization-header:AbCd…›");
+              assertThat(detail.get("sensitive"))
+                  .isEqualTo(java.util.List.of("authorization-header"));
+            });
+  }
+
+  @Test
+  @DisplayName("a private key in a tool result is replaced in the output before publishing")
+  void redactsToolResult() throws IOException {
+    poll();
+    append(
+        """
+        {"type":"user","sessionId":"s1","message":{"content":[\
+        {"type":"tool_result","tool_use_id":"none","content":\
+        "-----BEGIN RSA PRIVATE KEY-----\\nMIIEowIBAAKCAQEA\\n-----END RSA PRIVATE KEY-----\\n"}]}}\
+        """);
+
+    assertThat(poll())
+        .singleElement()
+        .satisfies(
+            e -> {
+              @SuppressWarnings("unchecked")
+              var detail = (java.util.Map<String, Object>) e.detail();
+              assertThat(e.summary()).doesNotContain("MIIEow").contains("‹private-key:----…›");
+              assertThat((String) detail.get("output"))
+                  .doesNotContain("MIIEow")
+                  .isEqualTo("‹private-key:----…›\n");
+              assertThat(detail.get("sensitive")).isEqualTo(java.util.List.of("private-key"));
+            });
   }
 }

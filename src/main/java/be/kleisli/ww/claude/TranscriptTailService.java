@@ -4,6 +4,7 @@ import be.kleisli.ww.core.ActiveWorkspace;
 import be.kleisli.ww.core.EventBus;
 import be.kleisli.ww.core.Text;
 import be.kleisli.ww.core.WatchEvent;
+import be.kleisli.ww.guard.SensitiveContentScanner;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
@@ -41,6 +42,7 @@ public class TranscriptTailService {
   private final SessionRegistry sessions;
   private final EventBus bus;
   private final ObjectMapper mapper;
+  private final SensitiveContentScanner scanner;
 
   /**
    * agentId -> kind of subagent, learned from that agent's own turns.
@@ -91,12 +93,14 @@ public class TranscriptTailService {
       TranscriptLocator locator,
       SessionRegistry sessions,
       EventBus bus,
-      ObjectMapper mapper) {
+      ObjectMapper mapper,
+      SensitiveContentScanner scanner) {
     this.active = active;
     this.locator = locator;
     this.sessions = sessions;
     this.bus = bus;
     this.mapper = mapper;
+    this.scanner = scanner;
   }
 
   @Scheduled(fixedDelayString = "${watcher.transcript-poll-ms:500}")
@@ -220,12 +224,18 @@ public class TranscriptTailService {
   private void emitToolUse(JsonNode block, Origin origin) {
     String tool = block.path("name").asString("tool");
     JsonNode input = block.path("input");
-    String label = describe(tool, input);
+    // Redacted before it is remembered: the label is quoted again on the result.
+    String label = scanner.redact(describe(tool, input)).text();
     pendingCalls.put(block.path("id").asString(""), label);
 
+    SensitiveContentScanner.Redacted redacted =
+        scanner.redactHead(input.toString(), Text.DETAIL_LIMIT);
     Map<String, Object> detail = new LinkedHashMap<>();
     detail.put("tool", tool);
-    detail.put("input", Text.truncate(input.toString(), Text.DETAIL_LIMIT));
+    detail.put("input", Text.truncate(redacted.text(), Text.DETAIL_LIMIT));
+    if (!redacted.rules().isEmpty()) {
+      detail.put("sensitive", redacted.rules());
+    }
     if (origin.agentId() != null) {
       detail.put("agentId", origin.agentId());
     }
@@ -246,14 +256,20 @@ public class TranscriptTailService {
     boolean error = block.path("is_error").asBoolean(false);
     JsonNode content = block.path("content");
     String body = content.isString() ? content.asString() : content.toString();
+    SensitiveContentScanner.Redacted redacted = scanner.redactHead(body, Text.DETAIL_LIMIT);
 
+    Map<String, Object> detail = new LinkedHashMap<>();
+    detail.put("output", Text.truncate(redacted.text(), Text.DETAIL_LIMIT));
+    if (!redacted.rules().isEmpty()) {
+      detail.put("sensitive", redacted.rules());
+    }
     bus.publish(
         WatchEvent.of(WatchEvent.Source.TRANSCRIPT, error ? "TOOL_ERROR" : "TOOL_RESULT")
             .agent("claude-code")
             .session(origin.session())
-            .summary(label != null ? label : firstLine(body))
+            .summary(label != null ? label : firstLine(redacted.text()))
             .subagent(origin.subagent())
-            .detail("output", Text.truncate(body, Text.DETAIL_LIMIT)));
+            .detail(detail));
   }
 
   /** A short, human-readable line for the activity feed. */

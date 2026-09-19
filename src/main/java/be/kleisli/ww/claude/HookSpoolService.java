@@ -2,6 +2,7 @@ package be.kleisli.ww.claude;
 
 import be.kleisli.ww.core.ActiveWorkspace;
 import be.kleisli.ww.core.EventBus;
+import be.kleisli.ww.guard.SensitiveContentScanner;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -43,13 +44,19 @@ public class HookSpoolService {
   private final WorkspaceRegistry registry;
   private final EventBus bus;
   private final ObjectMapper mapper;
+  private final SensitiveContentScanner scanner;
 
   public HookSpoolService(
-      ActiveWorkspace active, WorkspaceRegistry registry, EventBus bus, ObjectMapper mapper) {
+      ActiveWorkspace active,
+      WorkspaceRegistry registry,
+      EventBus bus,
+      ObjectMapper mapper,
+      SensitiveContentScanner scanner) {
     this.active = active;
     this.registry = registry;
     this.bus = bus;
     this.mapper = mapper;
+    this.scanner = scanner;
   }
 
   @Scheduled(fixedDelayString = "${watcher.spool-poll-ms:200}")
@@ -90,7 +97,7 @@ public class HookSpoolService {
           continue;
         }
         String raw = Files.readString(file, StandardCharsets.UTF_8);
-        HookEvents.publish(bus, mapper, raw, "spool");
+        HookEvents.publish(bus, mapper, scanner, raw, "spool");
       } catch (IOException | RuntimeException e) {
         log.debug("cannot read spool file {}: {}", file, e.toString());
       } finally {

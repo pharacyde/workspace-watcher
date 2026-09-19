@@ -159,6 +159,9 @@ query { activity(since: "2026-08-28T10:00:00Z", until: "2026-08-28T11:00:00Z", b
 
 # Recorded history, which outlives a restart
 query { history(since: "2026-08-28T10:00:00Z", limit: 500) { ts source summary agent } }
+
+# Secrets and personal data seen in what agents sent and received, newest first
+query { sensitiveEvents(limit: 50) { ts type summary path sessionId detail } }
 ```
 
 `source` is the field worth reading first: `TRANSCRIPT` and `HOOK` carry real attribution, `FS`
@@ -349,6 +352,31 @@ watcher that is slow, wedged or not running has to let the call through rather t
 with it — measured at 30ms to allow when nothing is listening. Anyone who can stop the watcher can
 bypass the guard. That is the right trade against an agent's mistakes, and the wrong one against an
 adversary.
+
+### Secrets and personal data, after the fact
+
+Separately from the guard and always on, every tool call, hook payload and tool result is scanned
+for what looks like a secret or personal data — API keys, private-key headers, JWTs, passwords in
+URLs, e-mail addresses, IBANs and the like. A hit becomes a `GUARD` event in the feed:
+`SENSITIVE_OUTBOUND` when the call it was found in names somewhere off this machine (`curl -d`,
+`scp`, `git push`, `WebFetch`, an MCP tool…) and `SENSITIVE_CONTENT` otherwise, as in `github-token
+in Bash → api.example.com`. The event carries the rule, the tool, the host and the four characters
+before the match — never the match itself. `status { sensitive }` counts them since start and
+`sensitiveEvents` lists the recorded ones.
+
+This is a reading of the command line, not of the network. `curl -T file` shows a file name and no
+content, `$TOKEN` in a header is invisible until the shell expands it, and a script that POSTs on
+its own is just a script. It cannot block anything, by design: it runs after the call was recorded.
+
+**Secrets are redacted at record time.** A hook payload or a transcript line that carries an API
+key, a GitHub or Slack token, a private key, a JWT, an `Authorization` header, a password in a URL
+or a `password=` assignment is stored with the match replaced by `‹rule:xxxx…›` - four characters,
+enough to see which token, not enough to use it - before it reaches the feed or the database.
+Personal data (e-mail, IBAN, Belgian national and mobile numbers, card numbers) is flagged on the
+event, never rewritten. The `redactHistory` mutation runs the same rules over rows recorded before
+this existed and returns how many changed. Be clear about what this is: Claude Code's own transcript
+under `~/.claude/projects` still holds the secret; this keeps it out of the copy that is served on
+loopback without auth.
 
 ## Configuration
 
